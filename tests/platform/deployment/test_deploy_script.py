@@ -1127,3 +1127,15 @@ def test_what_if_reads_root_level_changes_and_rejects_delete(tmp_path: Path) -> 
             {"parameters": {}},
             "test-deployment",
         )
+
+
+def test_upgrade_lock_rejects_a_second_holder(tmp_path: Path) -> None:
+    # Runs on Windows as well as POSIX: the lock is msvcrt there and fcntl here.
+    from scripts.deploy import _upgrade_lock
+
+    with _upgrade_lock(tmp_path / "upgrade"):
+        with pytest.raises(DeploymentError, match="Another process owns"):
+            with _upgrade_lock(tmp_path / "upgrade"):
+                pass
+    with _upgrade_lock(tmp_path / "upgrade"):
+        pass

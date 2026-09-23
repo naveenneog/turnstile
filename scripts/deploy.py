@@ -1412,13 +1412,27 @@ def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
 
 @contextmanager
 def _upgrade_lock(directory: Path) -> Iterator[None]:
-    try:
-        import fcntl
-    except ImportError as error:
-        raise DeploymentError("APIM upgrades require a POSIX deployment host") from error
+    """One upgrade at a time per deployment, on POSIX (fcntl) and Windows (msvcrt)."""
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (directory / ".lock").open("a+") as lock:
         os.chmod(lock.name, 0o600)
+        if os.name == "nt":
+            import msvcrt
+
+            # Byte 0 is the lock; the file's content is never read.
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                raise DeploymentError("Another process owns this APIM upgrade") from error
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            return
+        import fcntl
+
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:

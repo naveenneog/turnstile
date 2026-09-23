@@ -206,7 +206,9 @@ class EntraTokenVerifier:
             raise AuthError("该账户不属于此组织。")
 
         raw_roles = claims.get("roles")
-        roles = tuple(r for r in raw_roles if isinstance(r, str)) if isinstance(raw_roles, list) else ()
+        roles: tuple[str, ...] = ()
+        if isinstance(raw_roles, list):
+            roles = tuple(r for r in raw_roles if isinstance(r, str))
         return EntraIdentity(
             email=email,
             display_name=str(claims["name"]).strip() if claims.get("name") else None,

@@ -235,8 +235,11 @@ class CommandRunner:
         capture: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         print("$ " + " ".join(command))
+        # Resolve through PATHEXT: on Windows `az` and `npm` are .cmd files, which
+        # CreateProcess does not find from a bare name.
+        executable = shutil.which(command[0]) or command[0]
         return subprocess.run(
-            list(command),
+            [executable, *command[1:]],
             cwd=cwd,
             env=dict(env) if env is not None else None,
             check=True,

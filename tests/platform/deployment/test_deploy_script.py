@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import stat
 import subprocess
@@ -71,6 +72,7 @@ def _parameters(path: Path) -> Path:
     return path
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; NTFS permissions are not st_mode")
 def test_secret_state_is_private_stable_and_excludes_plaintext(tmp_path: Path) -> None:
     inputs = DeploymentInputs.load(
         "00000000-0000-0000-0000-000000000001",
@@ -248,6 +250,7 @@ def test_owner_credentials_are_private_and_match_public_email(tmp_path: Path) ->
         owner_credentials_password(path, "other@example.com")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; NTFS permissions are not st_mode")
 def test_owner_credentials_reject_group_or_world_access(tmp_path: Path) -> None:
     path = tmp_path / "owner.credentials.json"
     path.write_text(
@@ -398,6 +401,7 @@ def test_saved_outputs_enable_existing_core_on_rerun(tmp_path: Path) -> None:
     assert core.apim_resource_group_name == "turnstile-test"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes; NTFS permissions are not st_mode")
 def test_temporary_parameter_file_is_private_and_deleted(tmp_path: Path) -> None:
     with temporary_parameter_file({"parameters": {}}, tmp_path) as path:
         assert path.is_file()
@@ -517,6 +521,7 @@ def test_observer_registry_scope_is_independent_of_reused_apim(
     assert document["parameters"]["apimResourceGroupName"]["value"] == "shared-apim"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable bits; NTFS permissions are not st_mode")
 def test_deterministic_zip_has_stable_bytes_and_order(tmp_path: Path) -> None:
     source = tmp_path / "source"
     source.mkdir()
@@ -939,6 +944,7 @@ def test_runtime_release_recycles_updated_apps_without_stale_api_health(
     ]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes and fcntl; NTFS permissions are not st_mode")
 def test_upgrade_files_are_private_and_concurrent_execution_is_rejected(tmp_path: Path) -> None:
     directory = tmp_path / "upgrade"
     path = directory / "journal.json"

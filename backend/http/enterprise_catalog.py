@@ -7,12 +7,13 @@ partial update is how a department silently loses its parent.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from turnstile_core.domain.enterprise import catalog_response, catalog_rows, catalog_write_problems
 from turnstile_core.domain.models import EnterpriseCatalogResponse, EnterpriseCatalogWrite
 
 from .dependencies import Repository
+from .gateway_governance import GatewayApply, request_gateway_apply
 from .session import (
     CurrentSession,
     OwnerSession,
@@ -37,19 +38,28 @@ def get_enterprise_catalog(
 
 @router.put("/api/v1/enterprise-catalog", response_model=EnterpriseCatalogResponse)
 def put_enterprise_catalog(
-    write: EnterpriseCatalogWrite, repository: Repository, identity: OwnerSession
+    write: EnterpriseCatalogWrite,
+    repository: Repository,
+    identity: OwnerSession,
+    background: BackgroundTasks,
+    apply: GatewayApply,
 ) -> EnterpriseCatalogResponse:
     problems = catalog_write_problems(write)
     if problems:
         raise HTTPException(status_code=422, detail=problems)
     repository.replace_enterprise_entities(catalog_rows(write), identity.email)
+    request_gateway_apply(background, apply, f"catalog saved by {identity.email}")
     return catalog_response(repository.enterprise_entities())
 
 
 @router.delete("/api/v1/enterprise-catalog", response_model=EnterpriseCatalogResponse)
 def delete_enterprise_catalog(
-    repository: Repository, identity: OwnerSession
+    repository: Repository,
+    identity: OwnerSession,
+    background: BackgroundTasks,
+    apply: GatewayApply,
 ) -> EnterpriseCatalogResponse:
     """Return to the seeded catalog."""
     repository.replace_enterprise_entities([], identity.email)
+    request_gateway_apply(background, apply, f"catalog reset by {identity.email}")
     return catalog_response(repository.enterprise_entities())

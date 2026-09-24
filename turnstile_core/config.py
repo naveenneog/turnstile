@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     ledger_reservation_recovery_lag_minutes: int = Field(default=10, ge=6, le=120)
     ledger_reservation_finalization_lag_hours: int = Field(default=24, ge=1, le=168)
     management_api_key: SecretStr | None = None
+    # A Claude gateway that takes its governance from Turnstile: the Azure resource id of
+    # its apply job, which Turnstile starts after a catalog, budget or tier is saved.
+    gateway_apply_job_id: str | None = None
     production: bool = False
     image_generation_enabled: bool = False
     image_generation_defaults: ImageGenerationLimits = Field(

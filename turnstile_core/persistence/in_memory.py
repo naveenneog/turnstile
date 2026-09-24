@@ -131,6 +131,7 @@ class InMemoryRepository(
         self.conversations: list[dict[str, Any]] = []
         self.application_owner_rows: list[dict[str, Any]] = []
         self.enterprise_entity_rows: list[dict[str, Any]] = []
+        self.gateway_tier_rows: list[dict[str, Any]] = []
         # Mirrors the single seeded row migration 027 creates.
         self.assistant_setting: dict[str, Any] = {
             "model_id": None,
@@ -916,6 +917,15 @@ class InMemoryRepository(
     ) -> None:
         now = datetime.now(UTC)
         self.enterprise_entity_rows = [
+            {**dict(row), "updated_at": now, "updated_by": actor} for row in rows
+        ]
+
+    def gateway_tiers(self) -> list[dict[str, Any]]:
+        return [dict(row) for row in self.gateway_tier_rows]
+
+    def replace_gateway_tiers(self, rows: Sequence[Mapping[str, Any]], actor: str) -> None:
+        now = datetime.now(UTC)
+        self.gateway_tier_rows = [
             {**dict(row), "updated_at": now, "updated_by": actor} for row in rows
         ]
 

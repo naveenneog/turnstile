@@ -1085,6 +1085,43 @@ class PostgreSqlOpsDbProxy(
                         ],
                     )
 
+    def gateway_tiers(self) -> Sequence[dict[str, Any]]:
+        """The tiers a Claude gateway takes from Turnstile; empty means none configured."""
+        with self._connection() as connection:
+            rows = connection.execute(
+                """SELECT tier_id, name, entra_group, tokens_per_minute, tokens_per_day,
+                          models, position, updated_at, updated_by
+                   FROM gateway_tier
+                   ORDER BY position"""
+            ).fetchall()
+        return cast(Sequence[dict[str, Any]], rows)
+
+    def replace_gateway_tiers(self, rows: Sequence[Mapping[str, Any]], actor: str) -> None:
+        """Replace every tier in one transaction, so no reader sees half of them."""
+        with self._connection() as connection:
+            connection.execute("DELETE FROM gateway_tier")
+            if rows:
+                with connection.cursor() as cursor:
+                    cursor.executemany(
+                        """INSERT INTO gateway_tier (
+                               tier_id, name, entra_group, tokens_per_minute, tokens_per_day,
+                               models, position, updated_by
+                           ) VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)""",
+                        [
+                            (
+                                row["tier_id"],
+                                row["name"],
+                                row["entra_group"],
+                                row["tokens_per_minute"],
+                                row["tokens_per_day"],
+                                json.dumps(row["models"]),
+                                row["position"],
+                                actor,
+                            )
+                            for row in rows
+                        ],
+                    )
+
     def list_usage_anomalies(
         self, from_: datetime, to: datetime, filters: UsageFilters, limit: int
     ) -> Sequence[dict[str, Any]]:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from turnstile_core.domain.models import (
     DepartmentEnforcementWrite,
@@ -15,6 +15,7 @@ from turnstile_core.domain.models import (
 )
 
 from ..services.budget_service import BudgetConflictError, BudgetNotFoundError
+from .gateway_governance import GatewayApply, request_gateway_apply
 from .service_dependencies import TokenBudgetServiceDependency
 from .session import OwnerSession, require_allowed_write_origin, require_authenticated_session
 
@@ -93,13 +94,21 @@ def save_token_budget(
     service: TokenBudgetServiceDependency,
     identity: OwnerSession,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
+    background: BackgroundTasks,
+    apply: GatewayApply,
 ) -> TokenBudgetResponse:
     try:
-        return service.save(period, scope_type, scope_id, write, identity.email)
+        saved = service.save(period, scope_type, scope_id, write, identity.email)
     except BudgetNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BudgetConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    # A gateway enforces organization and department budgets; person budgets stay here.
+    if scope_type != "user":
+        request_gateway_apply(
+            background, apply, f"{scope_type} budget {scope_id} saved by {identity.email}"
+        )
+    return saved
 
 
 @router.delete("/api/v1/budgets/{scope_type}/{scope_id}", response_model=TokenBudgetResponse)
@@ -109,10 +118,17 @@ def delete_token_budget(
     service: TokenBudgetServiceDependency,
     identity: OwnerSession,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
+    background: BackgroundTasks,
+    apply: GatewayApply,
 ) -> TokenBudgetResponse:
     try:
-        return service.remove(period, scope_type, scope_id, identity.email)
+        removed = service.remove(period, scope_type, scope_id, identity.email)
     except BudgetNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except BudgetConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    if scope_type != "user":
+        request_gateway_apply(
+            background, apply, f"{scope_type} budget {scope_id} removed by {identity.email}"
+        )
+    return removed

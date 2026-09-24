@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -292,6 +292,69 @@ class EnterpriseCatalogResponse(StrictModel):
     default_department_id: str | None
     updated_at: datetime | None = None
     updated_by: str | None = None
+
+
+# A model name as a gateway's allow list carries it: comma-separated, so no commas.
+GATEWAY_MODEL_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$"
+GatewayModelName = Annotated[str, Field(pattern=GATEWAY_MODEL_NAME_PATTERN)]
+
+
+class GatewayTierWrite(StrictModel):
+    """One tier a Claude gateway enforces: who holds it, and its limits."""
+
+    id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,39}$")
+    name: str = Field(min_length=1, max_length=200)
+    # The Microsoft Entra group whose members hold the tier, by display name or object id.
+    entra_group: str = Field(min_length=1, max_length=256)
+    tokens_per_minute: int = Field(ge=1, le=100_000_000)
+    tokens_per_day: int = Field(ge=1, le=1_000_000_000_000)
+    # Empty means every model the gateway serves.
+    models: list[GatewayModelName] = Field(default_factory=list, max_length=100)
+
+
+class GatewayTiersWrite(StrictModel):
+    """The whole set of tiers. Writing it replaces the previous set."""
+
+    tiers: list[GatewayTierWrite] = Field(min_length=1, max_length=20)
+
+
+class GatewayTier(StrictModel):
+    id: str
+    name: str
+    entra_group: str
+    tokens_per_minute: int
+    tokens_per_day: int
+    models: list[str]
+
+
+class GatewayTiersResponse(StrictModel):
+    items: list[GatewayTier]
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+class GatewayApplyRequest(StrictModel):
+    """What happened when Turnstile asked the gateway to apply its governance."""
+
+    requested_at: datetime
+    reason: str
+    started: bool
+    execution: str | None = None
+    error: str | None = None
+
+
+class GatewayApplyExecution(StrictModel):
+    name: str
+    status: str
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+class GatewayApplyStatus(StrictModel):
+    configured: bool
+    last_request: GatewayApplyRequest | None = None
+    executions: list[GatewayApplyExecution] = Field(default_factory=list)
+    executions_error: str | None = None
 
 
 BudgetScopeType = Literal["organization", "department", "user"]

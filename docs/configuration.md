@@ -9,6 +9,7 @@ Copy `.env.example` to `.env` for the API and `frontend/.env.example` to `fronte
 | `DATABASE_URL` | PostgreSQL 16+ connection string. Require TLS outside a developer machine. |
 | `CREDENTIAL_ENCRYPTION_KEY` | Encrypts provider and integration credentials at rest. |
 | `MANAGEMENT_API_KEY` | Protects management automation where session authentication is unavailable. |
+| `GATEWAY_APPLY_JOB_ID` | Optional Azure resource id of a Claude gateway's apply job (an Azure Container Apps job). When set, saving the organization catalog, an organization or department budget, or the gateway tiers starts that job through Azure Resource Manager with the API's managed identity, which needs **Container Apps Jobs Operator** on the job. A failed start is shown on the gateway status and never fails the save. |
 
 ## Authentication
 

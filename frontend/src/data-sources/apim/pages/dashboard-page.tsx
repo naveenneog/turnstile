@@ -84,6 +84,7 @@ import {
   DropdownMenuTrigger,
 } from "../../../components/ui/dropdown-menu"
 import { usageWindow } from "../api"
+import { useAuth } from "../../../providers/auth-provider"
 import { getIntlLocale, useLocale, type LocalePreference } from "../../../locales/index"
 import { priceRequests } from "../../../lib/pricing"
 import { finopsKeys, finopsQueries, trendDimensionForFilters } from "../queries"
@@ -150,12 +151,14 @@ export function FinOpsDashboard({
   onOpenRequest: (requestId: string) => void
 }) {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
+  const managerScope = user?.manager_scope
   const [isRefreshing, setIsRefreshing] = useState(false)
   const tab = initialTab
   const header = pageHeaders[tab]
   const HeaderIcon = header.icon
   const entityQuery = useQuery(finopsQueries.entities())
-  const registryQuery = useQuery(finopsQueries.registry())
+  const registryQuery = useQuery({ ...finopsQueries.registry(), enabled: !managerScope })
   const filters = useMemo<UsageFilters>(() => ({ ...usageWindow(days), ...scope }), [days, scope])
   const entities = entityQuery.data
   const unpricedModels = registryQuery.data?.models.filter((model) => model.enabled && (model.input_cost_per_million == null || model.output_cost_per_million == null)) ?? []
@@ -184,7 +187,7 @@ export function FinOpsDashboard({
     {tab !== "invoke" && <div className="finops-filterbar">
       <FilterMenuField label="时间范围" icon={Clock3} value={String(days)} active={days !== 30} allowAll={false} options={[{ value: "7", label: "近 7 天" }, { value: "30", label: "近 30 天" }, { value: "90", label: "近 90 天" }]} onChange={(next) => next && onDaysChange(Number(next))} />
       {entities && <>
-        <FilterMenuField label="组织" icon={Building2} value={scope.organization_id} options={entities.organizations.map((item) => ({ value: item.id, label: item.name }))} onChange={(organization_id) => updateScope({ organization_id, department_id: undefined, agent_id: undefined, user_id: undefined })} />
+        <FilterMenuField label="组织" icon={Building2} value={scope.organization_id} options={(managerScope?.organizations ?? entities.organizations).map((item) => ({ value: item.id, label: item.name }))} onChange={(organization_id) => updateScope({ organization_id, department_id: undefined, agent_id: undefined, user_id: undefined })} />
         <FilterMenuField label="部门" icon={Users} value={scope.department_id} options={entities.departments.map((item) => ({ value: item.id, label: item.name }))} onChange={(department_id) => updateScope({ department_id, agent_id: undefined, user_id: undefined })} />
         {/* No project filter. It is the one dimension no token carries -- the APIM policy
             writes it as `unattributed` outright -- so 98.8% of production tokens have
@@ -201,11 +204,11 @@ export function FinOpsDashboard({
       <div className="finops-content">
         {(entityQuery.isLoading || registryQuery.isLoading) && <LoadingState label={tab === "invoke" ? "正在加载调用配置" : undefined} />}
         {(entityQuery.error || registryQuery.error) && <ErrorState error={entityQuery.error ?? registryQuery.error} />}
-        {entities && registryQuery.data && tab === "overview" && <ExecutiveOverview filters={filters} costAvailable={costAvailable} />}
-        {entities && registryQuery.data && tab === "analytics" && <ModelUsage filters={filters} costAvailable={costAvailable} />}
+        {entities && (managerScope || registryQuery.data) && tab === "overview" && <ExecutiveOverview filters={filters} costAvailable={costAvailable} />}
+        {entities && (managerScope || registryQuery.data) && tab === "analytics" && <ModelUsage filters={filters} costAvailable={costAvailable} />}
         {entities && tab === "trends" && <UsageTrends filters={filters} />}
-        {entities && registryQuery.data && tab === "governance" && <Governance filters={filters} entities={entities} models={registryQuery.data.models} onOpenRequest={onOpenRequest} />}
-        {entities && registryQuery.data && tab === "requests" && <RequestTrace filters={filters} costAvailable={costAvailable} models={registryQuery.data.models} />}
+        {entities && (managerScope || registryQuery.data) && tab === "governance" && <Governance filters={filters} entities={entities} models={registryQuery.data?.models ?? []} onOpenRequest={onOpenRequest} />}
+        {entities && (managerScope || registryQuery.data) && tab === "requests" && <RequestTrace filters={filters} costAvailable={costAvailable} models={registryQuery.data?.models ?? []} />}
         {entities && tab === "invoke" && <AgentInvocation entities={entities} />}
       </div>
     </div>

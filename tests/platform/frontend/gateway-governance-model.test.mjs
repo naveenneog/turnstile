@@ -5,6 +5,7 @@ import assert from "node:assert/strict"
 
 import {
   editableCatalog,
+  governanceOf,
   parseModels,
   problemsFor,
   removeTeam,
@@ -92,4 +93,47 @@ test("a seeded catalog is not a starting point, and a write carries no parent on
 test("models are a comma or space separated list; empty means every model", () => {
   assert.deepEqual(parseModels("claude-opus-5, claude-sonnet-5"), ["claude-opus-5", "claude-sonnet-5"])
   assert.deepEqual(parseModels("  "), [])
+})
+
+const managerGroupId = "ABCDEFAB-1234-5678-90AB-ABCDEFABCDEF"
+test("governance round trips exact attribute names and preserves unrelated attributes", () => {
+  const existing = saveUnit(empty, { id: "sales", name: "Sales", group: "g1" })
+  existing.organizations[0].attributes = { custom: "retained" }
+  const change = { id: "sales", name: "Sales", group: "g1", managerGroupId, enforcement: "allowance", allowancePercent: 15 }
+  let c = saveUnit(existing, change, "sales")
+  assert.deepEqual(c.organizations[0].attributes, {
+    custom: "retained", manager_group_id: managerGroupId.toLowerCase(),
+    enforcement: "allowance", allowance_percent: 15,
+  })
+  assert.equal(existing.organizations[0].attributes.enforcement, undefined)
+  assert.equal(governanceOf(c.organizations[0]).managerGroupId, managerGroupId.toLowerCase())
+  c = saveUnit(c, { ...change, enforcement: "strict" }, "sales")
+  assert.equal("allowance_percent" in c.organizations[0].attributes, false)
+  c = saveUnit(c, { ...change, managerGroupId: "", enforcement: "" }, "sales")
+  assert.deepEqual(c.organizations[0].attributes, { custom: "retained" })
+})
+
+test("teams save their own manager group and enforcement without changing membership", () => {
+  let c = saveUnit(empty, { id: "sales", name: "Sales", group: "g1" })
+  c = saveTeam(c, { id: "emea", name: "EMEA", group: "g2", parentId: "sales", managerGroupId, enforcement: "notify" })
+  const team = c.departments.find((d) => d.id === "emea")
+  assert.equal(team.external_ref, "entra-group:g2")
+  assert.deepEqual(team.attributes, { manager_group_id: managerGroupId.toLowerCase(), enforcement: "notify" })
+  assert.equal(c.organizations[0].attributes, undefined)
+})
+
+test("governance validation rejects names, malformed ids and fractional or missing allowance", () => {
+  const base = { kind: "unit", id: "sales", name: "Sales", group: "g1" }
+  for (const managerGroupId of ["group-name", "123", "{abcdefab-1234-5678-90ab-abcdefabcdef}"])
+    assert.ok(problemsFor(empty, { ...base, managerGroupId }).some((p) => p.includes("object id")))
+  for (const allowancePercent of [undefined, 0, 101, 1.5, NaN])
+    assert.ok(problemsFor(empty, { ...base, enforcement: "allowance", allowancePercent }).some((p) => p.includes("whole percentage")))
+  for (const allowancePercent of [1, 100])
+    assert.deepEqual(problemsFor(empty, { ...base, managerGroupId, enforcement: "allowance", allowancePercent }), [])
+})
+
+test("governance does not silently exceed the catalog attribute limit", () => {
+  const c = saveUnit(empty, { id: "sales", name: "Sales", group: "g1" })
+  c.organizations[0].attributes = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`key${i}`, i]))
+  assert.ok(problemsFor(c, { kind: "unit", id: "sales", editing: "sales", name: "Sales", group: "g1", managerGroupId }).some((p) => p.includes("20 attributes")))
 })

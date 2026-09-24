@@ -301,9 +301,7 @@ class PostgreSqlOpsDbProxy(
                 values,
             )
             if application is not None:
-                self._write_usage_application_attribution(
-                    connection, values["id"], application
-                )
+                self._write_usage_application_attribution(connection, values["id"], application)
 
     def model_prices(self) -> dict[str, ModelPrice]:
         """Registry unit prices keyed by both registry id and model key.
@@ -579,7 +577,7 @@ class PostgreSqlOpsDbProxy(
             rows = connection.execute(
                 f"""SELECT dimension_value, SUM(cache_read_tokens)::BIGINT AS cache_read_tokens
                     FROM apim_cache_read_hourly
-                    WHERE {' AND '.join(clauses)}
+                    WHERE {" AND ".join(clauses)}
                     GROUP BY dimension_value""",
                 parameters,
             ).fetchall()
@@ -731,8 +729,7 @@ class PostgreSqlOpsDbProxy(
             parameters,
         ).fetchall()
         return {
-            (row["bucket_start"], str(row["dimension_value"])): int(row["delta"])
-            for row in rows
+            (row["bucket_start"], str(row["dimension_value"])): int(row["delta"]) for row in rows
         }
 
     def overview(self, timezone: str) -> dict[str, Any]:
@@ -746,6 +743,19 @@ class PostgreSqlOpsDbProxy(
     def _filter_sql(filters: UsageFilters, *, alias: str = "usage") -> tuple[str, list[Any]]:
         clauses = [f"{alias}.usage_domain = 'apim'"]
         parameters: list[Any] = []
+        if (
+            filters.managed_organization_ids is not None
+            or filters.managed_department_ids is not None
+        ):
+            clauses.append(
+                f"({alias}.organization_id = ANY(%s) OR {alias}.department_id = ANY(%s))"
+            )
+            parameters.extend(
+                [
+                    sorted(filters.managed_organization_ids or ()),
+                    sorted(filters.managed_department_ids or ()),
+                ]
+            )
         for column, value in (
             ("organization_id", filters.organization_id),
             ("department_id", filters.department_id),
@@ -1056,9 +1066,7 @@ class PostgreSqlOpsDbProxy(
             ).fetchall()
         return cast(Sequence[dict[str, Any]], rows)
 
-    def replace_enterprise_entities(
-        self, rows: Sequence[Mapping[str, Any]], actor: str
-    ) -> None:
+    def replace_enterprise_entities(self, rows: Sequence[Mapping[str, Any]], actor: str) -> None:
         """Replace the whole catalog in one transaction, so no reader sees half of it."""
         with self._connection() as connection:
             connection.execute("DELETE FROM enterprise_entity")

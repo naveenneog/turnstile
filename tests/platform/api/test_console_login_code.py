@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from backend.api import app
+from backend.http.dependencies import get_repository
 from backend.http.session import get_auth_store, get_entra_access_verifier
 from backend.services.auth_service import hash_session_token
 from tests.platform.api.test_entra_bearer_admin import _configure, _token, client
@@ -29,7 +30,7 @@ MANAGER = "Turnstile.Manager"
 def _reset() -> Iterator[None]:
     yield
     client.cookies.clear()
-    for dependency in (get_auth_store, get_settings, get_entra_access_verifier):
+    for dependency in (get_auth_store, get_settings, get_entra_access_verifier, get_repository):
         app.dependency_overrides.pop(dependency, None)
 
 

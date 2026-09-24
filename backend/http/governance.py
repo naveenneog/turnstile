@@ -8,11 +8,17 @@ from turnstile_core.domain.models import AnomalyRule, AnomalyRuleListResponse, A
 
 from ..services.anomaly_service import AnomalyRuleConflictError, AnomalyRuleNotFoundError
 from .service_dependencies import AnomalyRuleServiceDependency
-from .session import OwnerSession, require_allowed_write_origin, require_authenticated_session
+from .session import (
+    OwnerSession,
+    require_allowed_write_origin,
+    require_authenticated_session,
+    require_manager_route,
+)
 
 router = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )

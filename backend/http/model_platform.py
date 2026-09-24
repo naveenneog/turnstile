@@ -78,10 +78,12 @@ from .session import (
     OwnerSession,
     require_allowed_write_origin,
     require_authenticated_session,
+    require_manager_route,
 )
 
 logger = logging.getLogger(__name__)
 InvocationRequest = TypeVar("InvocationRequest", ModelInvocationRequest, ImageInvocationRequest)
+
 
 class ModelPlatformRoute(APIRoute):
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
@@ -104,8 +106,9 @@ protected_router = APIRouter(
     route_class=ModelPlatformRoute,
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
-    ]
+    ],
 )
 publication_router = APIRouter(route_class=ModelPlatformRoute)
 
@@ -231,7 +234,9 @@ def adopt_databricks_connection(
 ) -> GatewayPublicationRequestAccepted:
     try:
         publication = service.adopt_databricks_connection(
-            runtime_id, str(write.workspace_url), identity.email,
+            runtime_id,
+            str(write.workspace_url),
+            identity.email,
         )
     except ControlPlaneNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

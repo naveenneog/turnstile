@@ -7,9 +7,9 @@ from tests.support.paths import (
 
 def test_centered_page_loading_states_share_one_visual_scale() -> None:
     css = read_frontend_styles()
-    shared_rule = css.split(
-        ".registry-loading, .finops-state:not(.empty):not(.error) {", 1
-    )[1].split("}", 1)[0]
+    shared_rule = css.split(".registry-loading, .finops-state:not(.empty):not(.error) {", 1)[
+        1
+    ].split("}", 1)[0]
     icon_rule = css.split(
         ".registry-loading > svg, .finops-state:not(.empty):not(.error) > svg {", 1
     )[1].split("}", 1)[0]
@@ -29,7 +29,7 @@ def test_invocation_console_includes_and_defaults_to_the_signed_in_owner() -> No
     assert "person.id === sessionUser.email" in source
     assert "useState(sessionUser?.email ?? users[0]?.id" in source
     assert "assignedModelRouters" not in source
-    assert 'items={users}' in source
+    assert "items={users}" in source
 
 
 def test_invocation_and_request_trace_use_direct_models() -> None:
@@ -58,9 +58,9 @@ def test_request_trace_kpis_are_diagnostic_not_executive_duplicates() -> None:
     assert ".trace-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }" in css
     assert 'finopsQueries.trends(filters, "none", "day")' in request_trace
     assert '<PanelTitle title="调用趋势" meta="每日" />' in request_trace
-    assert '<RequestVolumeTrendChart rows={volumeRows} />' in request_trace
+    assert "<RequestVolumeTrendChart rows={volumeRows} />" in request_trace
     assert 'title="时延占比分布"' in request_trace
-    assert '<RequestLatencyChart totals={totals} percentage />' in request_trace
+    assert "<RequestLatencyChart totals={totals} percentage />" in request_trace
     assert "<RequestHealthChart" not in request_trace
     assert "const firstRequestId = query.data?.[0]?.correlation_id ?? null" in request_trace
     assert "if (!selected && firstRequestId) setSelected(firstRequestId)" in request_trace
@@ -126,7 +126,9 @@ def test_member_governance_views_hide_owner_only_controls() -> None:
     assert 'className="budget-progress-cell" data-label="已使用"' in budget_source
     assert "minWidths={[180, 100, 140, 100, 110, 94, 88, 52]}" in budget_source
     assert ".budget-table-row > .budget-status-cell { grid-column: 1 / 3;" in finops_styles
-    assert "{canManage && <DropdownMenu>" in budget_source
+    assert "{(canEdit || onManagePeople) && <DropdownMenu>" in budget_source
+    assert "{canEdit && <DropdownMenuItem" in budget_source
+    assert "canEditBudget(user, item)" in budget_source
     assert "{canManage && bulkOpen && people.data" in budget_source
 
     assert 'const canManage = user?.role === "owner"' in anomaly_source
@@ -139,27 +141,23 @@ def test_budget_block_and_people_status_headers_are_centered() -> None:
 
     assert (
         ".budget-table-head > span:nth-child(6), "
-        ".budget-table-head > span:nth-child(7) { text-align: center; }"
-        in styles
+        ".budget-table-head > span:nth-child(7) { text-align: center; }" in styles
     )
     assert (
         ".people-table-head .people-status-heading "
-        "{ padding: 0 14px; text-align: center; }"
-        in styles
+        "{ padding: 0 14px; text-align: center; }" in styles
     )
 
 
 def test_data_source_switcher_replaces_the_legacy_access_channel_filter() -> None:
     app_source = (FRONTEND_SOURCE / "app.tsx").read_text(encoding="utf-8")
-    apim_source = (FRONTEND_SOURCE / "data-sources/apim/source.tsx").read_text(
-        encoding="utf-8"
-    )
+    apim_source = (FRONTEND_SOURCE / "data-sources/apim/source.tsx").read_text(encoding="utf-8")
     dashboard_source = read_apim_dashboard_source()
 
     assert 'type DataSource = "apim" | "github-copilot"' in app_source
     assert 'url.searchParams.set("source", next)' in app_source
-    assert '<ApimLogo size={17} />' in app_source
-    assert '<CopilotLogo size={17} />' in app_source
+    assert "<ApimLogo size={17} />" in app_source
+    assert "<CopilotLogo size={17} />" in app_source
     assert "function normalizePageForSource" in app_source
     assert "normalizePageForSource(next, page)" in app_source
     assert "export function normalizeApimPage" in apim_source
@@ -171,12 +169,10 @@ def test_data_source_switcher_replaces_the_legacy_access_channel_filter() -> Non
 
 def test_report_sidebar_group_uses_the_resource_name_not_the_pin_state() -> None:
     app_source = (FRONTEND_SOURCE / "app.tsx").read_text(encoding="utf-8")
-    pin_dialog = (
-        FRONTEND_SOURCE / "components/assistant/pin-dialog.tsx"
-    ).read_text(encoding="utf-8")
-    english = (FRONTEND_SOURCE / "locales/en/phrases-core.ts").read_text(
+    pin_dialog = (FRONTEND_SOURCE / "components/assistant/pin-dialog.tsx").read_text(
         encoding="utf-8"
     )
+    english = (FRONTEND_SOURCE / "locales/en/phrases-core.ts").read_text(encoding="utf-8")
 
     assert "<span>报表</span>" in app_source
     assert "<span>固定</span>" not in app_source
@@ -192,9 +188,9 @@ def test_copilot_pages_use_only_the_copilot_query_domain() -> None:
     budget_source = (
         FRONTEND_SOURCE / "data-sources/github-copilot/pages/budget-page.tsx"
     ).read_text(encoding="utf-8")
-    queries_source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/queries.ts"
-    ).read_text(encoding="utf-8")
+    queries_source = (FRONTEND_SOURCE / "data-sources/github-copilot/queries.ts").read_text(
+        encoding="utf-8"
+    )
 
     for source in (dashboard_source, budget_source):
         assert "finopsQueries" not in source
@@ -204,9 +200,7 @@ def test_copilot_pages_use_only_the_copilot_query_domain() -> None:
 
 
 def test_copilot_mobile_grids_can_shrink_to_the_viewport() -> None:
-    css = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/styles.css"
-    ).read_text(encoding="utf-8")
+    css = (FRONTEND_SOURCE / "data-sources/github-copilot/styles.css").read_text(encoding="utf-8")
 
     assert "grid-template-columns: minmax(0, 1fr)" in css
     assert ".copilot-combined-view > * { min-width: 0; grid-column: 1; }" in css
@@ -216,12 +210,10 @@ def test_copilot_mobile_grids_can_shrink_to_the_viewport() -> None:
 
 
 def test_usage_report_trend_has_no_redundant_divider_or_wide_left_inset() -> None:
-    source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx"
-    ).read_text(encoding="utf-8")
-    css = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/styles.css"
-    ).read_text(encoding="utf-8")
+    source = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx").read_text(
+        encoding="utf-8"
+    )
+    css = (FRONTEND_SOURCE / "data-sources/github-copilot/styles.css").read_text(encoding="utf-8")
 
     assert "tickMargin={6} width={44}" in source
     assert ".copilot-trend-panel > .finops-panel-title { border-bottom: 0; }" in css
@@ -229,12 +221,10 @@ def test_usage_report_trend_has_no_redundant_divider_or_wide_left_inset() -> Non
 
 
 def test_copilot_ai_usage_keeps_its_owned_real_data_surface() -> None:
-    source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx"
-    ).read_text(encoding="utf-8")
-    analytics = source.split("function Analytics", 1)[1].split(
-        "function ImportedUsagePanel", 1
-    )[0]
+    source = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx").read_text(
+        encoding="utf-8"
+    )
+    analytics = source.split("function Analytics", 1)[1].split("function ImportedUsagePanel", 1)[0]
 
     assert '<ActivityPanel daily={daily} title="用量趋势" />' in analytics
     assert '<span className="finops-panel-title-meta">每日</span>' not in source
@@ -248,9 +238,9 @@ def test_copilot_ai_usage_keeps_its_owned_real_data_surface() -> None:
 
 
 def test_copilot_usage_metrics_follows_a_decision_flow() -> None:
-    source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx"
-    ).read_text(encoding="utf-8")
+    source = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx").read_text(
+        encoding="utf-8"
+    )
     overview = source.split("function Overview", 1)[1].split("type BreakdownMetric", 1)[0]
 
     for series in ("activeUserSeries", "locSeries", "acceptanceRateSeries"):
@@ -273,9 +263,9 @@ def test_copilot_usage_metrics_follows_a_decision_flow() -> None:
     assert source.count("useChartDragZoom(") >= 2
     assert source.count("<ChartZoomReset") >= 2
     assert "活跃与规模" not in overview
-    primary_chart = overview.split("<MetricsGroup columns={1}>", 1)[1].split(
-        "</MetricsGroup>", 1
-    )[0]
+    primary_chart = overview.split("<MetricsGroup columns={1}>", 1)[1].split("</MetricsGroup>", 1)[
+        0
+    ]
     assert 'defaultMode="bar"' in primary_chart
 
     markers = (
@@ -293,9 +283,9 @@ def test_copilot_usage_metrics_follows_a_decision_flow() -> None:
 
 
 def test_copilot_tooltips_do_not_draw_hover_backdrops() -> None:
-    source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx"
-    ).read_text(encoding="utf-8")
+    source = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx").read_text(
+        encoding="utf-8"
+    )
     tooltip_tags = source.split("<Tooltip")[1:]
 
     assert tooltip_tags
@@ -303,21 +293,19 @@ def test_copilot_tooltips_do_not_draw_hover_backdrops() -> None:
 
 
 def test_chart_mode_buttons_use_the_compact_shared_size() -> None:
-    css = (
-        FRONTEND_SOURCE / "components/finops/chart-mode-toggle.css"
-    ).read_text(encoding="utf-8")
-    component = (
-        FRONTEND_SOURCE / "components/finops/chart-mode-toggle.tsx"
-    ).read_text(encoding="utf-8")
+    css = (FRONTEND_SOURCE / "components/finops/chart-mode-toggle.css").read_text(encoding="utf-8")
+    component = (FRONTEND_SOURCE / "components/finops/chart-mode-toggle.tsx").read_text(
+        encoding="utf-8"
+    )
 
     assert "width: 26px; height: 26px" in css
     assert "<Icon size={14}" in component
 
 
 def test_copilot_imported_pages_keep_reference_data_surfaces() -> None:
-    source = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx"
-    ).read_text(encoding="utf-8")
+    source = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/dashboard-page.tsx").read_text(
+        encoding="utf-8"
+    )
 
     assert "function ImportedTrendPanel" in source
     assert 'title="CSV 产品分布"' in source
@@ -333,9 +321,9 @@ def test_copilot_governance_pages_keep_operational_detail_surfaces() -> None:
     governance = (
         FRONTEND_SOURCE / "data-sources/github-copilot/pages/governance-page.tsx"
     ).read_text(encoding="utf-8")
-    requests = (
-        FRONTEND_SOURCE / "data-sources/github-copilot/pages/budget-page.tsx"
-    ).read_text(encoding="utf-8")
+    requests = (FRONTEND_SOURCE / "data-sources/github-copilot/pages/budget-page.tsx").read_text(
+        encoding="utf-8"
+    )
 
     assert "function CostCenterUserMapping" in governance
     assert 'aria-label="GitHub 用户成本中心映射"' in governance

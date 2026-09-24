@@ -166,14 +166,15 @@ class AuthStore:
         method: str,
         authenticated_at: datetime,
         expires_at: datetime,
+        manager_group_ids: tuple[str, ...] | None = None,
     ) -> None:
         with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO user_session (
-                    token_sha256, user_id, method, created_at, expires_at
+                    token_sha256, user_id, method, created_at, expires_at, manager_group_ids
                 )
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (
                     token_sha256,
@@ -181,6 +182,7 @@ class AuthStore:
                     method,
                     authenticated_at,
                     expires_at,
+                    list(manager_group_ids) if manager_group_ids is not None else None,
                 ),
             )
 
@@ -202,7 +204,8 @@ class AuthStore:
                     u.role,
                     s.method,
                     s.created_at,
-                    s.expires_at
+                    s.expires_at,
+                    s.manager_group_ids
                 FROM user_session AS s
                 JOIN app_user AS u ON u.id = s.user_id
                 WHERE s.token_sha256 = %s
@@ -219,16 +222,27 @@ class AuthStore:
 
     # --- browser sign-in codes -------------------------------------------------------
 
-    def create_login_code(self, user_id: UUID, code_sha256: str, expires_at: datetime) -> None:
+    def create_login_code(
+        self,
+        user_id: UUID,
+        code_sha256: str,
+        expires_at: datetime,
+        manager_group_ids: tuple[str, ...] | None = None,
+    ) -> None:
         """Store a single-use browser sign-in code, dropping any that have lapsed."""
         with self._connection() as connection:
             connection.execute("DELETE FROM console_login_code WHERE expires_at <= now()")
             connection.execute(
                 """
-                INSERT INTO console_login_code (code_sha256, user_id, expires_at)
-                VALUES (%s, %s, %s)
+                INSERT INTO console_login_code (code_sha256, user_id, expires_at, manager_group_ids)
+                VALUES (%s, %s, %s, %s)
                 """,
-                (code_sha256, user_id, expires_at),
+                (
+                    code_sha256,
+                    user_id,
+                    expires_at,
+                    list(manager_group_ids) if manager_group_ids is not None else None,
+                ),
             )
 
     def consume_login_code(self, code_sha256: str) -> dict[str, Any] | None:
@@ -246,7 +260,8 @@ class AuthStore:
                   AND c.user_id = u.id
                   AND c.expires_at > now()
                   AND u.enabled
-                RETURNING u.id, u.email, u.display_name, u.password_hash, u.role, u.enabled
+                RETURNING u.id, u.email, u.display_name, u.password_hash, u.role, u.enabled,
+                          c.manager_group_ids
                 """,
                 (code_sha256,),
             ).fetchone()

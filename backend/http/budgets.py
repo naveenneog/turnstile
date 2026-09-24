@@ -16,12 +16,20 @@ from turnstile_core.domain.models import (
 
 from ..services.budget_service import BudgetConflictError, BudgetNotFoundError
 from .gateway_governance import GatewayApply, request_gateway_apply
+from .manager_scope import ScopedManager
 from .service_dependencies import TokenBudgetServiceDependency
-from .session import OwnerSession, require_allowed_write_origin, require_authenticated_session
+from .session import (
+    CurrentSession,
+    OwnerSession,
+    require_allowed_write_origin,
+    require_authenticated_session,
+    require_manager_route,
+)
 
 router = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )
@@ -30,15 +38,21 @@ router = APIRouter(
 @router.get("/api/v1/budgets", response_model=TokenBudgetResponse)
 def get_token_budgets(
     service: TokenBudgetServiceDependency,
+    scope: ScopedManager,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
     include_users: bool = False,
 ) -> TokenBudgetResponse:
-    return service.overview(period, include_users=include_users)
+    return service.overview(
+        period,
+        include_users=include_users,
+        allowed_scopes=scope.budget_scopes if scope is not None else None,
+    )
 
 
 @router.get("/api/v1/budgets/users", response_model=TokenBudgetPeopleResponse)
 def get_people_budgets(
     service: TokenBudgetServiceDependency,
+    scope: ScopedManager,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
     department_id: str,
     query: Annotated[str | None, Query(max_length=200)] = None,
@@ -46,6 +60,8 @@ def get_people_budgets(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> TokenBudgetPeopleResponse:
+    if scope is not None:
+        scope.require_department(department_id)
     try:
         return service.people(period, department_id, query, status, offset, limit)
     except BudgetNotFoundError as error:
@@ -92,11 +108,16 @@ def save_token_budget(
     scope_id: str,
     write: TokenBudgetWrite,
     service: TokenBudgetServiceDependency,
-    identity: OwnerSession,
+    identity: CurrentSession,
+    scope: ScopedManager,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
     background: BackgroundTasks,
     apply: GatewayApply,
 ) -> TokenBudgetResponse:
+    if identity.role != "owner":
+        if scope is None:
+            raise HTTPException(status_code=403, detail="Owner role is required")
+        scope.require_budget_write(scope_type, scope_id)
     try:
         saved = service.save(period, scope_type, scope_id, write, identity.email)
     except BudgetNotFoundError as error:
@@ -108,7 +129,7 @@ def save_token_budget(
         request_gateway_apply(
             background, apply, f"{scope_type} budget {scope_id} saved by {identity.email}"
         )
-    return saved
+    return service.overview(period, allowed_scopes=scope.budget_scopes) if scope else saved
 
 
 @router.delete("/api/v1/budgets/{scope_type}/{scope_id}", response_model=TokenBudgetResponse)
@@ -116,11 +137,16 @@ def delete_token_budget(
     scope_type: Literal["organization", "department", "user"],
     scope_id: str,
     service: TokenBudgetServiceDependency,
-    identity: OwnerSession,
+    identity: CurrentSession,
+    scope: ScopedManager,
     period: Annotated[str, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")],
     background: BackgroundTasks,
     apply: GatewayApply,
 ) -> TokenBudgetResponse:
+    if identity.role != "owner":
+        if scope is None:
+            raise HTTPException(status_code=403, detail="Owner role is required")
+        scope.require_budget_write(scope_type, scope_id)
     try:
         removed = service.remove(period, scope_type, scope_id, identity.email)
     except BudgetNotFoundError as error:
@@ -131,4 +157,4 @@ def delete_token_budget(
         request_gateway_apply(
             background, apply, f"{scope_type} budget {scope_id} removed by {identity.email}"
         )
-    return removed
+    return service.overview(period, allowed_scopes=scope.budget_scopes) if scope else removed

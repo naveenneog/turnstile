@@ -14,16 +14,19 @@ from turnstile_core.domain.models import EnterpriseCatalogResponse, EnterpriseCa
 
 from .dependencies import Repository
 from .gateway_governance import GatewayApply, request_gateway_apply
+from .manager_scope import ScopedManager
 from .session import (
     CurrentSession,
     OwnerSession,
     require_allowed_write_origin,
     require_authenticated_session,
+    require_manager_route,
 )
 
 router = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )
@@ -31,8 +34,10 @@ router = APIRouter(
 
 @router.get("/api/v1/enterprise-catalog", response_model=EnterpriseCatalogResponse)
 def get_enterprise_catalog(
-    repository: Repository, identity: CurrentSession
+    repository: Repository, identity: CurrentSession, scope: ScopedManager
 ) -> EnterpriseCatalogResponse:
+    if scope is not None:
+        return scope.catalog
     return catalog_response(repository.enterprise_entities())
 
 

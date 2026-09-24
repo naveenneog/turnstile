@@ -9,10 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import app, get_entra_verifier
+from backend.http.dependencies import get_repository
 from backend.http.session import get_auth_store
 from backend.services.auth_service import EntraIdentity, hash_password
 from tests.support.paths import REPOSITORY_ROOT
 from turnstile_core.config import Settings, get_settings
+from turnstile_core.persistence.in_memory import InMemoryRepository
 
 client = TestClient(app)
 USER_ID = UUID("00000000-0000-4000-8000-000000000001")
@@ -35,6 +37,8 @@ class CapturingAuthStore:
         self, email: str, display_name: str | None, role: str | None = None
     ) -> dict[str, Any]:
         self.entra_upserts.append({"email": email, "role": role})
+        if role is not None:
+            self.role = role
         return self._user(None, email=email, display_name=display_name)
 
     def delete_expired_sessions(self) -> int:
@@ -48,6 +52,7 @@ class CapturingAuthStore:
         method: str,
         authenticated_at: datetime,
         expires_at: datetime,
+        manager_group_ids: tuple[str, ...] | None = None,
     ) -> None:
         self.sessions.append(
             {
@@ -56,12 +61,24 @@ class CapturingAuthStore:
                 "method": method,
                 "authenticated_at": authenticated_at,
                 "expires_at": expires_at,
+                "manager_group_ids": manager_group_ids,
             }
         )
 
-    def create_login_code(self, user_id: UUID, code_sha256: str, expires_at: datetime) -> None:
+    def create_login_code(
+        self,
+        user_id: UUID,
+        code_sha256: str,
+        expires_at: datetime,
+        manager_group_ids: tuple[str, ...] | None = None,
+    ) -> None:
         self.login_codes.append(
-            {"user_id": user_id, "code_sha256": code_sha256, "expires_at": expires_at}
+            {
+                "user_id": user_id,
+                "code_sha256": code_sha256,
+                "expires_at": expires_at,
+                "manager_group_ids": manager_group_ids,
+            }
         )
 
     def consume_login_code(self, code_sha256: str) -> dict[str, Any] | None:
@@ -70,7 +87,10 @@ class CapturingAuthStore:
                 del self.login_codes[index]
                 if item["expires_at"] <= datetime.now(UTC):
                     return None
-                return self._user(None, email="admin@contoso.com", display_name="Admin")
+                return {
+                    **self._user(None, email="admin@contoso.com", display_name="Admin"),
+                    "manager_group_ids": item["manager_group_ids"],
+                }
         return None
 
     def session_owner(self, token_sha256: str) -> dict[str, Any] | None:
@@ -88,6 +108,7 @@ class CapturingAuthStore:
             "method": session["method"],
             "created_at": session["authenticated_at"],
             "expires_at": session["expires_at"],
+            "manager_group_ids": session["manager_group_ids"],
         }
 
     def touch_last_login(self, user_id: UUID) -> None:
@@ -151,11 +172,13 @@ def auth_dependencies() -> Iterator[CapturingAuthStore]:
     app.dependency_overrides[get_auth_store] = lambda: store
     app.dependency_overrides[get_entra_verifier] = AcceptingEntraVerifier
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_repository] = InMemoryRepository
     yield store
     client.cookies.clear()
     app.dependency_overrides.pop(get_auth_store, None)
     app.dependency_overrides.pop(get_entra_verifier, None)
     app.dependency_overrides.pop(get_settings, None)
+    app.dependency_overrides.pop(get_repository, None)
 
 
 def test_password_and_entra_issue_the_same_absolute_session_ttl(
@@ -182,9 +205,7 @@ def test_password_and_entra_issue_the_same_absolute_session_ttl(
     ]
     assert auth_dependencies.expired_cleanup_calls == 2
 
-    for response, session in zip(
-        (password, entra), auth_dependencies.sessions, strict=True
-    ):
+    for response, session in zip((password, entra), auth_dependencies.sessions, strict=True):
         expires_at = datetime.fromisoformat(response.json()["session_expires_at"])
         assert expires_at == session["expires_at"]
         assert datetime.fromisoformat(response.json()["session_expires_at"]) == expires_at

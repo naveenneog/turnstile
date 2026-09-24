@@ -20,11 +20,11 @@ Copy `.env.example` to `.env` for the API and `frontend/.env.example` to `fronte
 | `ENTRA_ALLOWED_EMAIL_DOMAINS` | JSON array of exact email domains allowed to sign in. |
 | `ENTRA_TENANT_IDS` | Optional JSON array of tenant IDs whose tokens are accepted. Empty keeps multi-tenant sign-in; a single-tenant registration lists its own tenant. Set from the `entraTenantId` deployment parameter. |
 | `VITE_ENTRA_TENANT_ID` | The same tenant compiled into the frontend, which then signs in against that tenant instead of `/organizations`. |
-| `ENTRA_ADMIN_ROLE` | Optional Entra app role a Microsoft sign-in must carry. When set, only holders sign in, they sign in as Owner, and nobody else is given an account. Pair it with **Assignment required** on the enterprise application so Entra refuses everyone else before a token is issued. Set from the `entraAdminRole` deployment parameter. |
+| `ENTRA_ADMIN_ROLE` | Optional Entra app role granting Owner. When set, sign-in requires this role or a configured Viewer/Manager role; everyone else is refused before an account is written. Pair it with **Assignment required** on the enterprise application. Set from the `entraAdminRole` deployment parameter. |
 | `ENTRA_VIEWER_ROLE` | Optional Entra app role that signs in read-only, as Member, beside `ENTRA_ADMIN_ROLE`: a FinOps viewer who sees every page and changes nothing an Owner governs. Empty keeps the console admin-only. A person holding none of the configured roles still never signs in. |
-| `ENTRA_MANAGER_ROLE` | Optional Entra app role that signs in as Member for a manager. Managers are people, never applications. Empty keeps the console admin-only. |
+| `ENTRA_MANAGER_ROLE` | Optional Entra app role that signs in as a catalog-scoped Member. Only manager-only identities are scoped; Admin or Viewer takes precedence. Missing, malformed or overage groups grant no managed scope. Empty disables this role. |
 
-With both `ENTRA_ADMIN_ROLE` and `ENTRA_TENANT_IDS` set, the API also accepts a Microsoft Entra **access token** (`Authorization: Bearer`) in place of a session, for scripts and automation. The token must be issued for this application (audience `ENTRA_CLIENT_ID` or `api://ENTRA_CLIENT_ID`) by a pinned tenant and carry the admin role. A person's token must also carry the `Turnstile.Manage` scope and an allowed mail domain, and acts as that person's Owner account; a workload identity's app-only token acts as `app:<client id>`. Without both settings, tokens are ignored and only sessions are accepted. A tenant must be pinned because, in a multi-tenant registration, another tenant's administrator can assign this application's roles to anyone in their own tenant.
+With both `ENTRA_ADMIN_ROLE` and `ENTRA_TENANT_IDS` set, the API also accepts a Microsoft Entra **access token** (`Authorization: Bearer`) in place of a session, for scripts and automation. The token must be issued for this application (audience `ENTRA_CLIENT_ID` or `api://ENTRA_CLIENT_ID`) by a pinned tenant and carry a configured console role. A person's token must also carry the `Turnstile.Manage` scope and an allowed mail domain, and acts with the same role and manager scope as sign-in; a workload identity's app-only token acts as `app:<client id>`. Without both settings, bearer tokens are refused and only sessions are accepted. A tenant must be pinned because, in a multi-tenant registration, another tenant's administrator can assign this application's roles to anyone in their own tenant.
 | `MEMBER_SESSION_TTL_HOURS` | Fixed member session duration. |
 | `OWNER_SESSION_TTL_HOURS` | Fixed owner session duration. |
 | `SESSION_COOKIE_NAME` | Session cookie name; defaults to `turnstile_session`. |
@@ -35,6 +35,45 @@ With both `ENTRA_ADMIN_ROLE` and `ENTRA_TENANT_IDS` set, the API also accepts a 
 The frontend uses the Microsoft `organizations` authority. Tenant admission is enforced by exact email-domain matching in the backend. The self-service deployment script creates the first password Owner only when the user table is empty. Subsequent password changes use `python -m backend.accounts`; application restarts never reset the bootstrap account.
 
 Delegated invocation does not change the authenticated session. A Member remains the recorded actor, while the configured tester becomes the effective `x-user-id` used for model access, budget enforcement, and Request Trace. The tester must exist in the enterprise directory and belong to the selected department; arbitrary or cross-department identities are rejected by the API.
+
+### Manager scope and gateway governance
+
+Set the registration's `groupMembershipClaims` to `ApplicationGroup`. Assign each manager
+security group to the Turnstile enterprise application with `Turnstile.Manager`; record its
+**object id**, not its name, on the unit or team in Gateway governance. The attribute is
+`manager_group_id`. Membership groups (`external_ref`) are separate and remain unchanged.
+Direct group membership is required; do not rely on nested groups being emitted by Entra.
+No Graph lookup or overage URL is followed.
+
+A manager-only identity sees organizations whose manager group is in its verified token,
+departments managed directly, and every department (including direct members) of a managed
+organization. A team's parent unit is included only as catalog context, not as a readable
+unit budget or an authorized unit filter. Usage authorization is
+`organization_id in managed units OR department_id in managed teams`, intersected with all
+requested filters. Out-of-scope unit, team, user, project and agent filters are forbidden.
+
+Only executive overview, distribution, trends, anomalies, request list/detail, scoped
+budgets and people, and scoped enterprise entities/catalog are available. Gateway tiers,
+gateway apply status and anomaly rules are readable configuration. Other protected routes
+(including assistant, Copilot, models, applications, old overview, runs, audit findings
+and optimizations) are denied by default. Managers can change person budgets in scope;
+unit managers can also change their child department budgets. Organization budgets,
+bulk allocation/model policy, enforcement switches, catalog/tier writes and apply-now stay
+owner-only. Existing parent allocation limits still apply.
+
+Token group ids are snapshotted in browser sessions and single-use login codes; bearer
+requests use the current token. Scope is resolved from the current catalog on every
+request, so catalog changes take effect without another sign-in. Entra membership changes
+require a new token/session. NULL groups mean unrestricted (owners, viewers, password
+sessions); empty groups mean no scope. `/api/v1/auth/me` returns `manager_scope` with
+managed organizations, departments and writable department ids, or null.
+
+Owners can also set `attributes.enforcement` to `strict`, `allowance` or `notify`.
+`attributes.allowance_percent` is required only for allowance, an integer 1–100, and is
+removed for the other modes. Leaving enforcement unset preserves the gateway default.
+These are gateway-authored configuration attributes, distinct from Turnstile's existing
+person-budget block/audit switch. Enforcement is implemented by the connected gateway,
+not by the Turnstile UI; saving starts its configured apply job.
 
 ## APIM and control plane
 

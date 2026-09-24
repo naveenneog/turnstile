@@ -22,7 +22,17 @@ git diff --check
 
 ## Database validation
 
-For a clean installation, run `uv run python -m backend.migrate` against an authorized new PostgreSQL 16+ database. Verify one `schema_migration` row per numbered migration (currently `001_initial_schema`, `002_apim_request_attempt_identity`, `003_budget_reservation_finalization`, `004_apim_usage_identity_guard`, `005_billable_request_lifecycle`, `006_versioned_budget_evidence`, `007_model_price_source`, `008_price_review_and_guard`, `009_enterprise_catalog`, `010_gateway_tiers`, and `011_console_login_code`), then run the command again and verify that no migration is reapplied.
+For a clean installation, run `uv run python -m backend.migrate` against an authorized new PostgreSQL 16+ database. Verify one `schema_migration` row per numbered migration (currently `001_initial_schema`, `002_apim_request_attempt_identity`, `003_budget_reservation_finalization`, `004_apim_usage_identity_guard`, `005_billable_request_lifecycle`, `006_versioned_budget_evidence`, `007_model_price_source`, `008_price_review_and_guard`, `009_enterprise_catalog`, `010_gateway_tiers`, `011_console_login_code`, and `012_manager_scope`), then run the command again and verify that no migration is reapplied.
+
+Migration `012` adds nullable group-id arrays to sessions and console login codes. It
+expires pre-upgrade Entra Member sessions and Member login codes because their original
+Viewer versus Manager app role cannot be recovered safely. Owners and password sessions
+are retained; viewers sign in again once. Roll out without older API workers that can
+issue unrestricted manager sessions. Verify an owner still signs in, a manager-only
+account is scoped on both Entra and CLI/code sign-in, and a token with missing or overage
+groups sees no units/teams. `tests/platform/api/test_manager_scope.py` covers the route
+deny-list complement, group propagation, filtered reads, writes, and SQL/in-memory scope
+semantics. Frontend node tests cover navigation, row editing and governance attributes.
 
 The initial schema contains no users, credentials, provider connections, runtimes, business models, usage events, or customer data.
 

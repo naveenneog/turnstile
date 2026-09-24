@@ -42,7 +42,11 @@ from .http.service_dependencies import (
 from .http.service_dependencies import (
     runtime_service as _runtime_service,
 )
-from .http.session import require_allowed_write_origin, require_authenticated_session
+from .http.session import (
+    require_allowed_write_origin,
+    require_authenticated_session,
+    require_manager_route,
+)
 from .http.static_files import validate_production_web_dist
 
 logger = logging.getLogger(__name__)
@@ -71,6 +75,7 @@ app = FastAPI(title="Token Observability API", version="0.1.0", lifespan=lifespa
 protected = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )

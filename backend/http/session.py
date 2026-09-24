@@ -17,7 +17,7 @@ from ..services.auth_service import (
     EntraCaller,
     hash_session_token,
 )
-from .entra_roles import console_role
+from .entra_roles import console_role, manager_groups
 
 
 @lru_cache
@@ -40,6 +40,7 @@ class SessionIdentity:
     role: Literal["owner", "member"]
     method: Literal["password", "entra"]
     session_expires_at: datetime
+    manager_group_ids: tuple[str, ...] | None = None
 
 
 @lru_cache
@@ -104,6 +105,7 @@ def identity_for_caller(
         role=role,
         method="entra",
         session_expires_at=caller.expires_at,
+        manager_group_ids=manager_groups(settings, caller.roles, caller.groups),
     )
 
 
@@ -140,10 +142,45 @@ def require_authenticated_session(
         role=role,  # type: ignore[arg-type]
         method=method,  # type: ignore[arg-type]
         session_expires_at=owner["expires_at"],
+        manager_group_ids=(
+            tuple(owner["manager_group_ids"])
+            if owner.get("manager_group_ids") is not None and role != "owner" and method == "entra"
+            else None
+        ),
     )
 
 
 CurrentSession = Annotated[SessionIdentity, Depends(require_authenticated_session)]
+
+
+MANAGER_READ_ROUTES = frozenset(
+    {
+        "/api/v1/observability/anomalies",
+        "/api/v1/observability/distribution",
+        "/api/v1/observability/executive-overview",
+        "/api/v1/observability/requests",
+        "/api/v1/observability/requests/{request_id}",
+        "/api/v1/observability/trends",
+        "/api/v1/budgets",
+        "/api/v1/budgets/users",
+        "/api/v1/enterprise/entities",
+        "/api/v1/enterprise-catalog",
+        "/api/v1/gateway-tiers",
+        "/api/v1/gateway-apply",
+        "/api/v1/anomaly-rules",
+    }
+)
+
+
+def require_manager_route(request: Request, identity: CurrentSession) -> None:
+    if identity.manager_group_ids is None:
+        return
+    path = getattr(request.scope.get("route"), "path", None)
+    if request.method == "GET" and path in MANAGER_READ_ROUTES:
+        return
+    if request.method in {"PUT", "DELETE"} and path == "/api/v1/budgets/{scope_type}/{scope_id}":
+        return
+    raise HTTPException(status_code=403, detail="This page is not available to scoped managers")
 
 
 def require_owner_session(identity: CurrentSession) -> SessionIdentity:

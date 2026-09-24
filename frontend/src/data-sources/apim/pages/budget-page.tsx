@@ -58,6 +58,7 @@ import { dataSource } from "../api"
 import { getIntlLocale, useLocale, type LocalePreference } from "../../../locales/index"
 import { finopsKeys, finopsQueries } from "../queries"
 import { useAuth } from "../../../providers/auth-provider"
+import { canEditBudget } from "../../../lib/manager-scope"
 import type {
   BudgetScopeType,
   DepartmentEnforcement,
@@ -125,8 +126,10 @@ function sumLimits(items: TokenBudgetItem[]) {
   return items.reduce((total, item) => total + (item.token_limit ?? 0), 0)
 }
 
-function BudgetKpis({ data }: { data: TokenBudgetResponse }) {
-  const organizations = data.items.filter((item) => item.scope_type === "organization")
+function BudgetKpis({ data, scopedManager }: { data: TokenBudgetResponse; scopedManager: boolean }) {
+  const unitIds = new Set(data.items.filter((item) => item.scope_type === "organization").map((item) => item.scope_id))
+  const organizations = data.items.filter((item) => item.scope_type === "organization"
+    || (scopedManager && item.scope_type === "department" && !unitIds.has(item.parent_scope_id ?? "")))
   const allocatedBudget = sumLimits(organizations)
   const usedTokens = organizations.reduce((total, item) => total + item.used_tokens, 0)
   const remainingTokens = allocatedBudget - usedTokens
@@ -138,9 +141,9 @@ function BudgetKpis({ data }: { data: TokenBudgetResponse }) {
   )
   const kpis = [
     {
-      label: "组织总预算",
+      label: scopedManager ? "Managed scope budget" : "组织总预算",
       value: allocatedBudget ? formatTokens(allocatedBudget) : "未分配",
-      detail: `${organizations.filter((item) => item.token_limit != null).length} 个组织已配置`,
+      detail: scopedManager ? `${organizations.filter((item) => item.token_limit != null).length} managed units / teams allocated` : `${organizations.filter((item) => item.token_limit != null).length} 个组织已配置`,
       icon: WalletCards,
     },
     {
@@ -334,6 +337,7 @@ function BudgetProgress({ item }: { item: TokenBudgetItem }) {
 function BudgetRow({
   item,
   canManage,
+  canEdit,
   depth,
   expanded,
   hasChildren,
@@ -347,6 +351,7 @@ function BudgetRow({
 }: {
   item: TokenBudgetItem
   canManage: boolean
+  canEdit: boolean
   depth: number
   expanded: boolean
   hasChildren: boolean
@@ -396,14 +401,14 @@ function BudgetRow({
         : <span className="budget-enforce-na">--</span>}
     </div>
     <div className="budget-row-actions">
-      {canManage && <DropdownMenu>
+      {(canEdit || onManagePeople) && <DropdownMenu>
         <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="budget-row-menu-trigger" aria-label={`${item.scope_name} 操作`} title="更多操作" />}>
           <MoreHorizontal size={15} />
           <span className="sr-only">更多操作</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4} className="budget-row-menu-content">
           {onManagePeople && <DropdownMenuItem disabled={item.token_limit == null} onClick={onManagePeople}><Users size={14} />管理人员预算</DropdownMenuItem>}
-          <DropdownMenuItem disabled={editDisabled} onClick={onEdit}>{item.token_limit == null ? <Plus size={14} /> : <Pencil size={14} />}{item.token_limit == null ? "分配预算" : `编辑${scopeLabels[item.scope_type]}预算`}</DropdownMenuItem>
+          {canEdit && <DropdownMenuItem disabled={editDisabled} onClick={onEdit}>{item.token_limit == null ? <Plus size={14} /> : <Pencil size={14} />}{item.token_limit == null ? "分配预算" : `编辑${scopeLabels[item.scope_type]}预算`}</DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>}
     </div>
@@ -413,6 +418,8 @@ function BudgetRow({
 function BudgetTable({
   items,
   canManage,
+  canEdit,
+  canManagePeople,
   onEdit,
   onManagePeople,
   enforcement,
@@ -421,6 +428,8 @@ function BudgetTable({
 }: {
   items: TokenBudgetItem[]
   canManage: boolean
+  canEdit: (item: TokenBudgetItem) => boolean
+  canManagePeople: boolean
   onEdit: (item: TokenBudgetItem) => void
   onManagePeople: (departmentId: string) => void
   enforcement: DepartmentEnforcement[]
@@ -449,6 +458,10 @@ function BudgetTable({
         result.push({ item: department, depth: 1, hasChildren: false, parentAllocated: organization.token_limit != null })
       }
     }
+    const organizationIds = new Set(organizations.map((item) => item.scope_id))
+    for (const department of items.filter((item) => item.scope_type === "department" && !organizationIds.has(item.parent_scope_id ?? ""))) {
+      result.push({ item: department, depth: 0, hasChildren: false, parentAllocated: false })
+    }
     return result
   }, [collapsed, items])
   const toggle = (scopeId: string) => setCollapsed((current) => {
@@ -475,13 +488,14 @@ function BudgetTable({
             key={`${item.scope_type}:${item.scope_id}`}
             item={item}
             canManage={canManage}
+            canEdit={canEdit(item)}
             depth={depth}
             expanded={!collapsed.has(item.scope_id)}
             hasChildren={hasChildren}
             parentAllocated={parentAllocated}
             onToggle={() => toggle(item.scope_id)}
             onEdit={() => onEdit(byKey.get(`${item.scope_type}:${item.scope_id}`) ?? item)}
-            onManagePeople={item.scope_type === "department" ? () => onManagePeople(item.scope_id) : undefined}
+            onManagePeople={canManagePeople && item.scope_type === "department" ? () => onManagePeople(item.scope_id) : undefined}
             enforcement={item.scope_type === "department" ? enforcementByDepartment.get(item.scope_id) : undefined}
             enforcementBusy={enforcementBusy}
             onToggleEnforcement={item.scope_type === "department"
@@ -662,6 +676,7 @@ function PeopleBudgetWorkspace({
   models,
   departmentId,
   onDepartmentChange,
+  onEditBudget,
 }: {
   period: string
   canManage: boolean
@@ -669,6 +684,7 @@ function PeopleBudgetWorkspace({
   models: ManagedModel[]
   departmentId: string
   onDepartmentChange: (departmentId: string) => void
+  onEditBudget?: (item: TokenBudgetItem) => void
 }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
@@ -777,7 +793,7 @@ function PeopleBudgetWorkspace({
         <div><strong>{formatFullTokens(item.used_tokens)}</strong><small>{item.usage_percent == null ? "--" : `${item.usage_percent}%`}</small></div>
         <div><strong>{item.remaining_tokens == null ? "--" : formatFullTokens(item.remaining_tokens)}</strong><small>Token</small></div>
         <div className="budget-status-cell"><span data-status={item.status}>{statusLabels[item.status]}</span></div>
-        {canManage ? <Button type="button" variant="ghost" size="icon-sm" className="people-budget-edit-button" title="设置人员预算与模型" onClick={() => { setSelectedIds(new Set([item.scope_id])); setAllMatching(false); bulk.reset(); setBulkOpen(true) }}><Pencil size={14} /></Button> : <span />}
+        {canManage ? <Button type="button" variant="ghost" size="icon-sm" className="people-budget-edit-button" title="设置人员预算与模型" onClick={() => { setSelectedIds(new Set([item.scope_id])); setAllMatching(false); bulk.reset(); setBulkOpen(true) }}><Pencil size={14} /></Button> : onEditBudget ? <Button type="button" variant="ghost" size="icon-sm" aria-label={`Edit budget for ${item.scope_name}`} onClick={() => onEditBudget(item)}><Pencil size={14} /></Button> : <span />}
       </div>)}
     </ResizableGridTable></div>}
     {people.data && <div className="people-table-footer">
@@ -903,17 +919,19 @@ export function BudgetManagementPage({ onToggleSidebar }: { onToggleSidebar: () 
   const queryClient = useQueryClient()
   const { user } = useAuth()
   const canManage = user?.role === "owner"
+  const canEdit = (item: TokenBudgetItem) => canEditBudget(user, item)
   const [period, setPeriod] = useState(currentPeriod)
   const [editing, setEditing] = useState<TokenBudgetItem | null>(null)
   const [peopleDepartmentId, setPeopleDepartmentId] = useState("")
   const periodBounds = useMemo(() => periodBoundsFor(currentPeriod()), [])
   const query = useQuery(finopsQueries.budgets(period))
-  const registry = useQuery(finopsQueries.registry())
+  const registry = useQuery({ ...finopsQueries.registry(), enabled: !user?.manager_scope })
   const save = useMutation({
     mutationFn: ({ item, value }: { item: TokenBudgetItem; value: TokenBudgetWrite }) =>
       dataSource.saveBudget(period, item.scope_type, item.scope_id, value),
     onSuccess: (data) => {
       queryClient.setQueryData(finopsKeys.budgets(period), data)
+      void queryClient.invalidateQueries({ queryKey: ["finops", "budgets"] })
       setEditing(null)
     },
   })
@@ -922,6 +940,7 @@ export function BudgetManagementPage({ onToggleSidebar }: { onToggleSidebar: () 
       dataSource.deleteBudget(period, item.scope_type, item.scope_id),
     onSuccess: (data) => {
       queryClient.setQueryData(finopsKeys.budgets(period), data)
+      void queryClient.invalidateQueries({ queryKey: ["finops", "budgets"] })
       setEditing(null)
     },
   })
@@ -976,17 +995,19 @@ export function BudgetManagementPage({ onToggleSidebar }: { onToggleSidebar: () 
         {query.isLoading && <div className="finops-state"><RefreshCw className="spin" size={18} />正在加载预算</div>}
         {query.error && <div className="finops-state error"><AlertTriangle size={18} /><b>预算接口不可用</b><span>{queryError(query.error)}</span></div>}
         {query.data && <>
-          <BudgetKpis data={query.data} />
+          <BudgetKpis data={query.data} scopedManager={!!user?.manager_scope} />
           <BudgetTable
             items={query.data.items}
             canManage={canManage}
+            canEdit={canEdit}
+            canManagePeople={canManage || !!user?.manager_scope}
             onEdit={(item) => { save.reset(); remove.reset(); setEditing(item) }}
             onManagePeople={managePeople}
             enforcement={query.data.enforcement}
             enforcementBusy={enforcement.isPending}
             onToggleEnforcement={(departmentId, mode) => enforcement.mutate({ departmentId, mode })}
           />
-          {activePeopleDepartmentId && <PeopleBudgetWorkspace period={period} canManage={canManage} departments={departments} models={enabledModels} departmentId={activePeopleDepartmentId} onDepartmentChange={setPeopleDepartmentId} />}
+          {activePeopleDepartmentId && <PeopleBudgetWorkspace period={period} canManage={canManage} departments={departments} models={enabledModels} departmentId={activePeopleDepartmentId} onDepartmentChange={setPeopleDepartmentId} onEditBudget={user?.manager_scope ? (item) => { if (canEdit(item)) { save.reset(); remove.reset(); setEditing(item) } } : undefined} />}
           <div className="budget-secondary-grid">
             <BudgetRiskPanel data={query.data} />
             <BudgetHistory data={query.data} models={registry.data?.models ?? []} />
@@ -994,7 +1015,7 @@ export function BudgetManagementPage({ onToggleSidebar }: { onToggleSidebar: () 
         </>}
       </div>
     </div>
-    {canManage && editing && query.data && <BudgetEditor
+    {editing && canEdit(editing) && query.data && <BudgetEditor
       key={`${period}:${editing.scope_type}:${editing.scope_id}`}
       item={editing}
       items={query.data.items}

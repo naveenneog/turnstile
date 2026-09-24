@@ -1,6 +1,6 @@
 .gg-content { display: flex; flex-direction: column; gap: 20px; }
 .gg-lead { margin: 0; color: var(--muted-foreground, #6b7280); font-size: 13px; max-width: 880px; }
-.gg-section { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; background: var(--card, #fff); overflow: hidden; }
+.gg-section { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; background: var(--card, #fff); overflow-x: auto; }
 .gg-section-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border, #e5e7eb); }
 .gg-section-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
 .gg-table { width: 100%; border-collapse: collapse; font-size: 13px; }

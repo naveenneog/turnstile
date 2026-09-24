@@ -401,10 +401,8 @@ class InMemoryRepository(
             if existing.estimated and not record.estimated:
                 self.usage_records[index] = record.model_copy(
                     update={
-                        "budget_admission": record.budget_admission
-                        or existing.budget_admission,
-                        "model_admission": record.model_admission
-                        or existing.model_admission,
+                        "budget_admission": record.budget_admission or existing.budget_admission,
+                        "model_admission": record.model_admission or existing.model_admission,
                     }
                 )
             elif not existing.estimated and not record.estimated:
@@ -457,9 +455,10 @@ class InMemoryRepository(
     def model_identities(self) -> dict[str, ModelIdentity]:
         identities: dict[str, ModelIdentity] = {}
         for publication in self.gateway_publications:
-            if publication["publication_kind"] != "model_remove" or publication[
-                "status"
-            ] not in {"active", "superseded"}:
+            if publication["publication_kind"] != "model_remove" or publication["status"] not in {
+                "active",
+                "superseded",
+            }:
                 continue
             for target in publication["desired_spec"].get("removed_models", []):
                 model_id = str(target["model_id"])
@@ -518,9 +517,7 @@ class InMemoryRepository(
                     ),
                     "estimated_cost": _repriced(record, item),
                     "estimated": cache_unknown,
-                    "ingest_error": (
-                        "stream_cache_usage_unavailable" if cache_unknown else None
-                    ),
+                    "ingest_error": ("stream_cache_usage_unavailable" if cache_unknown else None),
                 }
             )
             self.reconciled_usage_ids.add(record.id)
@@ -586,14 +583,10 @@ class InMemoryRepository(
         dimension_type: str,
         dimension_values: Sequence[str],
     ) -> None:
-        metric = self.apim_cache_read_totals(
-            from_, to, dimension_type, dimension_values
-        )
+        metric = self.apim_cache_read_totals(from_, to, dimension_type, dimension_values)
         if not metric:
             return
-        dimension_field = (
-            dimension_type if dimension_type == "runtime" else f"{dimension_type}_id"
-        )
+        dimension_field = dimension_type if dimension_type == "runtime" else f"{dimension_type}_id"
         database_cache = int(totals.get("cache_read_tokens", 0))
         metric_cache = 0
         database_apim_cache = 0
@@ -610,13 +603,19 @@ class InMemoryRepository(
             )
         corrected = database_cache + max(metric_cache - database_apim_cache, 0)
         totals["cache_read_tokens"] = corrected
-        totals["total_tokens"] = max(
-            int(totals["total_tokens"]) + corrected - database_cache, 0
-        )
+        totals["total_tokens"] = max(int(totals["total_tokens"]) + corrected - database_cache, 0)
 
     @staticmethod
     def _matches(record: TokenUsageRecord, filters: UsageFilters) -> bool:
         if record.usage_domain != "apim":
+            return False
+        if (
+            filters.managed_organization_ids is not None
+            or filters.managed_department_ids is not None
+        ) and (
+            record.organization_id not in (filters.managed_organization_ids or ())
+            and record.department_id not in (filters.managed_department_ids or ())
+        ):
             return False
         for field, value in (
             ("organization_id", filters.organization_id),
@@ -673,11 +672,7 @@ class InMemoryRepository(
         latencies = [float(record.latency_ms) for record in records]
 
         def in_band(low: float, high: float | None) -> int:
-            return sum(
-                1
-                for value in latencies
-                if value >= low and (high is None or value < high)
-            )
+            return sum(1 for value in latencies if value >= low and (high is None or value < high))
 
         return {
             "total_tokens": sum(
@@ -685,8 +680,7 @@ class InMemoryRepository(
                 for record in records
             ),
             "cache_read_tokens": sum(
-                max(record.cached_tokens - record.cache_write_tokens, 0)
-                for record in records
+                max(record.cached_tokens - record.cache_write_tokens, 0) for record in records
             ),
             "total_requests": count,
             "estimated_cost": round(sum(record.estimated_cost for record in records), 8),
@@ -694,18 +688,14 @@ class InMemoryRepository(
                 sum(record.latency_ms for record in records) / count if count else 0, 2
             ),
             "error_rate": round(
-                100 * sum(record.status_code >= 400 for record in records) / count
-                if count
-                else 0,
+                100 * sum(record.status_code >= 400 for record in records) / count if count else 0,
                 2,
             ),
             "p50_latency_ms": InMemoryRepository._percentile_cont(latencies, 0.5),
             "p95_latency_ms": InMemoryRepository._percentile_cont(latencies, 0.95),
             "p99_latency_ms": InMemoryRepository._percentile_cont(latencies, 0.99),
             "success_requests": sum(record.status_code < 400 for record in records),
-            "client_error_requests": sum(
-                400 <= record.status_code < 500 for record in records
-            ),
+            "client_error_requests": sum(400 <= record.status_code < 500 for record in records),
             "server_error_requests": sum(record.status_code >= 500 for record in records),
             "latency_under_1s": in_band(0, 1000),
             "latency_1_to_2s": in_band(1000, 2000),
@@ -747,8 +737,7 @@ class InMemoryRepository(
             "generated_at": datetime.now(UTC),
             "totals": current,
             "changes_percent": {
-                key: self._change(float(current[key]), float(previous[key]))
-                for key in current
+                key: self._change(float(current[key]), float(previous[key])) for key in current
             },
         }
 
@@ -782,9 +771,7 @@ class InMemoryRepository(
         for (id_, name), values in grouped.items():
             totals = self._executive_totals(values)
             if cache_distribution_supported(dimension, filters):
-                self._apply_metric_cache(
-                    totals, values, from_, to, dimension, (id_,)
-                )
+                self._apply_metric_cache(totals, values, from_, to, dimension, (id_,))
             cost = float(totals["estimated_cost"])
             breakdown: list[dict[str, Any]] = []
             if split_by is not None:
@@ -912,9 +899,7 @@ class InMemoryRepository(
     def enterprise_entities(self) -> list[dict[str, Any]]:
         return [dict(row) for row in self.enterprise_entity_rows]
 
-    def replace_enterprise_entities(
-        self, rows: Sequence[Mapping[str, Any]], actor: str
-    ) -> None:
+    def replace_enterprise_entities(self, rows: Sequence[Mapping[str, Any]], actor: str) -> None:
         now = datetime.now(UTC)
         self.enterprise_entity_rows = [
             {**dict(row), "updated_at": now, "updated_by": actor} for row in rows
@@ -1083,8 +1068,7 @@ class InMemoryRepository(
                 if "copilot" in f"{model_key} {display_name}".lower()
                 else "openai"
                 if any(
-                    value in f"{model_key} {display_name}".lower()
-                    for value in ("gpt", "openai")
+                    value in f"{model_key} {display_name}".lower() for value in ("gpt", "openai")
                 )
                 else "generic"
             ),
@@ -1190,28 +1174,20 @@ class InMemoryRepository(
                             max(record.cached_tokens - record.cache_write_tokens, 0)
                             for record in records
                         ),
-                        "cache_write_tokens": sum(
-                            record.cache_write_tokens for record in records
-                        ),
+                        "cache_write_tokens": sum(record.cache_write_tokens for record in records),
                         "output_tokens": sum(record.output_tokens for record in records),
                         "calls": len(records),
-                        "estimated_cost": sum(
-                            record.estimated_cost or 0.0 for record in records
-                        ),
+                        "estimated_cost": sum(record.estimated_cost or 0.0 for record in records),
                         "p95_latency_ms": InMemoryRepository._percentile_cont(
                             [float(record.latency_ms) for record in records], 0.95
                         ),
-                        "failed_calls": sum(
-                            1 for record in records if record.status_code >= 400
-                        ),
+                        "failed_calls": sum(1 for record in records if record.status_code >= 400),
                     },
                 }
             )
         cache_dimension: str | None = None
         cache_values: tuple[str, ...] | None = None
-        if group_by in CACHE_DIMENSION_FIELDS and cache_distribution_supported(
-            group_by, filters
-        ):
+        if group_by in CACHE_DIMENSION_FIELDS and cache_distribution_supported(group_by, filters):
             cache_dimension = group_by
             cache_values = tuple(sorted({str(point["key"]) for point in points}))
         elif group_by == "none":

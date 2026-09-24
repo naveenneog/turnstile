@@ -29,6 +29,7 @@ import { useAuth } from "../../../providers/auth-provider"
 import {
   editableCatalog,
   gatewayGovernanceApi,
+  governanceOf,
   parseModels,
   problemsFor,
   removeTeam,
@@ -41,6 +42,7 @@ import {
   type EnterpriseCatalogWrite,
   type GatewayApplyStatus,
   type GatewayTier,
+  type GovernanceChange,
 } from "../gateway-governance"
 import "../../../styles/gateway-governance.css"
 
@@ -142,18 +144,18 @@ export function GatewayGovernancePage({ onToggleSidebar }: { onToggleSidebar: ()
 
         {current && <section className="gg-section">
           <div className="gg-section-head"><h2>Business units</h2>{canManage && <Button size="sm" onClick={() => setEditing({ kind: "unit" })}><Plus size={13} />Add business unit</Button>}</div>
-          <table className="gg-table"><thead><tr><th>Business unit</th><th>Id</th><th>Entra group</th><th>Teams</th><th /></tr></thead><tbody>
-            {units.length === 0 && <tr><td colSpan={5} className="gg-empty">No business units yet.</td></tr>}
-            {units.map((u) => <tr key={u.id}><td>{u.name}</td><td><code>{u.id}</code></td><td>{u.group || "--"}</td><td>{u.teams}</td>
+          <table className="gg-table"><thead><tr><th>Business unit</th><th>Id</th><th>Entra group</th><th>Teams</th><th>Manager group / enforcement</th><th /></tr></thead><tbody>
+            {units.length === 0 && <tr><td colSpan={6} className="gg-empty">No business units yet.</td></tr>}
+            {units.map((u) => <tr key={u.id}><td>{u.name}</td><td><code>{u.id}</code></td><td>{u.group || "--"}</td><td>{u.teams}</td><td><GovernanceSummary value={governanceOf(current.organizations.find((o) => o.id === u.id))} /></td>
               <td className="gg-actions">{canManage && <Button variant="ghost" size="icon-sm" aria-label={`Edit ${u.name}`} onClick={() => setEditing({ kind: "unit", id: u.id })}><Pencil size={14} /></Button>}</td></tr>)}
           </tbody></table>
         </section>}
 
         {current && <section className="gg-section">
           <div className="gg-section-head"><h2>Teams</h2>{canManage && units.length > 0 && <Button size="sm" onClick={() => setEditing({ kind: "team" })}><Plus size={13} />Add team</Button>}</div>
-          <table className="gg-table"><thead><tr><th>Team</th><th>Id</th><th>Business unit</th><th>Entra group</th><th /></tr></thead><tbody>
-            {teams.length === 0 && <tr><td colSpan={5} className="gg-empty">No teams yet.</td></tr>}
-            {teams.map((t) => <tr key={t.id}><td>{t.name}</td><td><code>{t.id}</code></td><td>{t.parentName}</td><td>{t.group || "--"}</td>
+          <table className="gg-table"><thead><tr><th>Team</th><th>Id</th><th>Business unit</th><th>Entra group</th><th>Manager group / enforcement</th><th /></tr></thead><tbody>
+            {teams.length === 0 && <tr><td colSpan={6} className="gg-empty">No teams yet.</td></tr>}
+            {teams.map((t) => <tr key={t.id}><td>{t.name}</td><td><code>{t.id}</code></td><td>{t.parentName}</td><td>{t.group || "--"}</td><td><GovernanceSummary value={governanceOf(current.departments.find((d) => d.id === t.id))} /></td>
               <td className="gg-actions">{canManage && <Button variant="ghost" size="icon-sm" aria-label={`Edit ${t.name}`} onClick={() => setEditing({ kind: "team", id: t.id })}><Pencil size={14} /></Button>}</td></tr>)}
           </tbody></table>
         </section>}
@@ -189,6 +191,10 @@ export function GatewayGovernancePage({ onToggleSidebar }: { onToggleSidebar: ()
   </div>
 }
 
+function GovernanceSummary({ value }: { value: GovernanceChange }) {
+  return <><code>{value.managerGroupId || "No manager group"}</code><br /><span>{value.enforcement || "Gateway default"}{value.enforcement === "allowance" ? ` (+${value.allowancePercent}%)` : ""}</span></>
+}
+
 function StructureEditor({ editing, catalog, busy, error, onClose, onSave }: {
   editing: { kind: "unit" | "team"; id?: string }
   catalog: EnterpriseCatalogWrite
@@ -204,14 +210,19 @@ function StructureEditor({ editing, catalog, busy, error, onClose, onSave }: {
   const [id, setId] = useState(existing?.id ?? "")
   const [name, setName] = useState(existing?.name ?? "")
   const [group, setGroup] = useState(existing?.group ?? "")
+  const governance = governanceOf((isUnit ? catalog.organizations : catalog.departments).find((e) => e.id === editing.id))
+  const [managerGroupId, setManagerGroupId] = useState(governance.managerGroupId ?? "")
+  const [enforcement, setEnforcement] = useState(governance.enforcement ?? "")
+  const [allowancePercent, setAllowancePercent] = useState(String(governance.allowancePercent ?? 10))
   const [parentId, setParentId] = useState((existing && "parentId" in existing ? existing.parentId : "") || unitsOf(catalog)[0]?.id || "")
   const [problems, setProblems] = useState<string[]>([])
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const found = problemsFor(catalog, { kind: editing.kind, id, name, group, parentId, editing: editing.id })
+    const change = { id, name, group, parentId, managerGroupId, enforcement, allowancePercent: Number(allowancePercent) }
+    const found = problemsFor(catalog, { ...change, kind: editing.kind, editing: editing.id })
     setProblems(found)
     if (found.length) return
-    onSave(isUnit ? saveUnit(catalog, { id, name, group }, editing.id) : saveTeam(catalog, { id, name, group, parentId }, editing.id))
+    onSave(isUnit ? saveUnit(catalog, change, editing.id) : saveTeam(catalog, change, editing.id))
   }
   const remove = () => onSave(isUnit ? removeUnit(catalog, editing.id as string) : removeTeam(catalog, editing.id as string))
   const noun = isUnit ? "business unit" : "team"
@@ -226,6 +237,9 @@ function StructureEditor({ editing, catalog, busy, error, onClose, onSave }: {
           <label className="registry-field"><span className="registry-field-label">Name</span><Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus /></label>
           <label className="registry-field"><span className="registry-field-label">Id</span><Input value={id} onChange={(e) => setId(e.target.value.toLowerCase())} required /><small>Used in reports and budgets. Lower case, no spaces.</small></label>
           <label className="registry-field"><span className="registry-field-label">Entra group</span><Input value={group} onChange={(e) => setGroup(e.target.value)} required placeholder="claude-bu-sales" /><small>Its members belong to this {noun}. The gateway checks that the group exists.</small></label>
+          <label className="registry-field"><span className="registry-field-label">Manager group object id</span><Input value={managerGroupId} onChange={(e) => setManagerGroupId(e.target.value)} placeholder="00000000-0000-0000-0000-000000000000" /><small>Optional. Assign this security group to the Turnstile enterprise application with Turnstile.Manager. It is separate from the membership group above.</small></label>
+          <label className="registry-field"><span className="registry-field-label">Budget enforcement</span><select className="gg-select" value={enforcement} onChange={(e) => setEnforcement(e.target.value as NonNullable<GovernanceChange["enforcement"]>)}><option value="">Gateway default</option><option value="strict">Strict — stop at the budget</option><option value="allowance">Allowance — permit limited overage</option><option value="notify">Notify — report without blocking</option></select></label>
+          {enforcement === "allowance" && <label className="registry-field"><span className="registry-field-label">Allowance percent</span><Input type="number" min={1} max={100} step={1} value={allowancePercent} onChange={(e) => setAllowancePercent(e.target.value)} required /><small>Whole percentage above the budget, from 1 to 100. Removed when another mode is selected.</small></label>}
           {!isUnit && <label className="registry-field"><span className="registry-field-label">Business unit</span>
             <select className="gg-select" value={parentId} onChange={(e) => setParentId(e.target.value)}>{unitsOf(catalog).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
           {(problems.length > 0 || error) && <div className="registry-error">{[...problems, ...(error ? [error] : [])].join(". ")}</div>}

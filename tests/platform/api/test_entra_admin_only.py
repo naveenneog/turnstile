@@ -18,11 +18,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from backend.api import app, get_entra_verifier
+from backend.http.dependencies import get_repository
 from backend.http.session import get_auth_store
 from backend.services.auth_service import AuthError, EntraIdentity, EntraTokenVerifier
 from tests.platform.api.test_auth_session import CapturingAuthStore
 from tests.support.paths import REPOSITORY_ROOT
 from turnstile_core.config import Settings, get_settings
+from turnstile_core.persistence.in_memory import InMemoryRepository
 
 client = TestClient(app)
 ORIGIN = {"Origin": "http://localhost:5173"}
@@ -35,12 +37,17 @@ ADMIN_ROLE = "Turnstile.Admin"
 class RoleVerifier:
     """Stands in for a verified token carrying the given app roles."""
 
-    def __init__(self, roles: tuple[str, ...]) -> None:
+    def __init__(self, roles: tuple[str, ...], groups: tuple[str, ...] = ()) -> None:
         self._roles = roles
+        self._groups = groups
 
     def verify(self, token: str) -> EntraIdentity:
         return EntraIdentity(
-            email="admin@contoso.com", display_name="Admin", tenant_id=TENANT, roles=self._roles
+            email="admin@contoso.com",
+            display_name="Admin",
+            tenant_id=TENANT,
+            roles=self._roles,
+            groups=self._groups,
         )
 
 
@@ -54,6 +61,13 @@ def admin_only() -> Iterator[CapturingAuthStore]:
     client.cookies.clear()
     for dependency in (get_auth_store, get_settings, get_entra_verifier):
         app.dependency_overrides.pop(dependency, None)
+
+
+@pytest.fixture(autouse=True)
+def repository() -> Iterator[None]:
+    app.dependency_overrides[get_repository] = InMemoryRepository
+    yield
+    app.dependency_overrides.pop(get_repository, None)
 
 
 def test_a_sign_in_without_the_admin_role_is_refused_and_leaves_no_account(

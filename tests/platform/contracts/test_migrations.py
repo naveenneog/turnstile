@@ -36,6 +36,7 @@ def test_migration_chain_preserves_clean_install_and_adds_attempt_identity() -> 
         "009_enterprise_catalog.up.sql",
         "010_gateway_tiers.up.sql",
         "011_console_login_code.up.sql",
+        "012_manager_scope.up.sql",
     ]
     assert not list(MIGRATIONS.glob("*.down.sql"))
 
@@ -51,6 +52,15 @@ def test_the_review_baseline_and_the_pending_price_are_separate_columns() -> Non
         "the accepted baseline keeps the meaning it already had; only the proposal is new"
     )
     assert "'superseded'::text" in sql
+
+
+def test_manager_scope_upgrade_is_nullable_and_expires_ambiguous_member_sessions() -> None:
+    sql = (MIGRATIONS / "012_manager_scope.up.sql").read_text(encoding="utf-8")
+    assert "ALTER TABLE user_session ADD COLUMN manager_group_ids TEXT[]" in sql
+    assert "ALTER TABLE console_login_code ADD COLUMN manager_group_ids TEXT[]" in sql
+    assert "NOT NULL" not in sql
+    assert "u.role = 'member' AND s.method = 'entra'" in sql
+    assert "DELETE FROM console_login_code AS c USING app_user AS u" in sql
 
 
 def test_attempt_identity_upgrade_preserves_existing_usage() -> None:

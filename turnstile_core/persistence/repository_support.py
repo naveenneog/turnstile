@@ -9,11 +9,7 @@ from urllib.parse import urlsplit
 def _activation_runtime_config(binding: Mapping[str, Any]) -> dict[str, Any]:
     config = {
         **(binding.get("runtime_config") or {}),
-        "path": (
-            "/chat/completions"
-            if binding["api_format"] == "openai_chat"
-            else "/v1/messages"
-        ),
+        "path": ("/chat/completions" if binding["api_format"] == "openai_chat" else "/v1/messages"),
         "api_format": binding["api_format"],
         "streaming_mode": binding["streaming_mode"],
         "control_plane_managed": True,
@@ -61,6 +57,9 @@ class UsageFilters:
     # be answerable without inventing a channel column the ingestion path does not produce.
     runtime: tuple[str, ...] | None = None
     status_code: int | None = None
+    # Unlike ordinary selection filters, empty scope sets match nothing, not everything.
+    managed_organization_ids: frozenset[str] | None = None
+    managed_department_ids: frozenset[str] | None = None
 
 
 CACHE_DIMENSION_FIELDS = {
@@ -76,6 +75,8 @@ CACHE_DIMENSION_FIELDS = {
 
 def cache_scope_for_filters(filters: UsageFilters) -> tuple[str, tuple[str, ...]] | None:
     """Use the bounded APIM metric only for an unfiltered global view."""
+    if filters.managed_organization_ids is not None or filters.managed_department_ids is not None:
+        return None
     if any(
         (
             filters.organization_id,
@@ -101,9 +102,7 @@ class BudgetConstraintViolation(ValueError):
     pass
 
 
-def attach_charts(
-    reports: Sequence[dict[str, Any]], charts: Sequence[Any]
-) -> list[dict[str, Any]]:
+def attach_charts(reports: Sequence[dict[str, Any]], charts: Sequence[Any]) -> list[dict[str, Any]]:
     """Nest each report's charts under it, preserving the order the rows arrived in.
 
     Both repositories fetch reports and their charts as two flat result sets, so the

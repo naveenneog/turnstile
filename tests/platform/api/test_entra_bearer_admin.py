@@ -18,10 +18,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 from backend.api import app
+from backend.http.dependencies import get_repository
 from backend.http.session import get_auth_store, get_entra_access_verifier
 from backend.services.auth_service import EntraAccessTokenVerifier
 from tests.platform.api.test_auth_session import CapturingAuthStore
 from turnstile_core.config import Settings, get_settings
+from turnstile_core.persistence.in_memory import InMemoryRepository
 
 client = TestClient(app)
 TENANT = "11111111-2222-3333-4444-555555555555"
@@ -85,6 +87,7 @@ def _configure(**overrides: Any) -> CapturingAuthStore:
     app.dependency_overrides[get_auth_store] = lambda: store
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_entra_access_verifier] = _verifier
+    app.dependency_overrides[get_repository] = InMemoryRepository
     return store
 
 
@@ -92,7 +95,7 @@ def _configure(**overrides: Any) -> CapturingAuthStore:
 def _reset() -> Iterator[None]:
     yield
     client.cookies.clear()
-    for dependency in (get_auth_store, get_settings, get_entra_access_verifier):
+    for dependency in (get_auth_store, get_settings, get_entra_access_verifier, get_repository):
         app.dependency_overrides.pop(dependency, None)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
+from uuid import UUID
 
 from .models import (
     EnterpriseCatalogEntity,
@@ -41,6 +42,23 @@ def catalog_write_problems(write: EnterpriseCatalogWrite) -> list[str]:
         for key in entity.attributes:
             if not key or len(key) > 64:
                 problems.append(f"{entity.id}: attribute names must be 1 to 64 characters")
+        attributes = entity.attributes
+        if "manager_group_id" in attributes:
+            group = attributes["manager_group_id"]
+            try:
+                if not isinstance(group, str) or str(UUID(group)) != group.lower():
+                    raise ValueError
+            except ValueError:
+                problems.append(f"{entity.id}: manager_group_id must be an Entra group object id")
+        enforcement = attributes.get("enforcement")
+        if enforcement is not None and enforcement not in ("strict", "allowance", "notify"):
+            problems.append(f"{entity.id}: enforcement must be strict, allowance or notify")
+        allowance = attributes.get("allowance_percent")
+        if enforcement == "allowance":
+            if type(allowance) is not int or not 1 <= allowance <= 100:
+                problems.append(f"{entity.id}: allowance_percent must be an integer from 1 to 100")
+        elif "allowance_percent" in attributes:
+            problems.append(f"{entity.id}: allowance_percent requires allowance enforcement")
     return problems
 
 

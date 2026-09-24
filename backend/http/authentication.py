@@ -19,7 +19,9 @@ from ..services.auth_service import (
     session_expiry,
     verify_password,
 )
-from .entra_roles import console_role
+from .dependencies import Repository
+from .entra_roles import console_role, manager_groups
+from .manager_scope import ManagedScopeProfile, ScopedManager, resolve_manager_scope
 from .session import (
     AccessVerifier,
     Config,
@@ -63,6 +65,7 @@ class Profile(BaseModel):
     role: Literal["owner", "member"]
     method: Literal["password", "entra"]
     session_expires_at: datetime
+    manager_scope: ManagedScopeProfile | None = None
 
 
 # Long enough to open a browser from a terminal, short enough that a link left in a history
@@ -82,7 +85,13 @@ class LoginCodeRedeem(BaseModel):
 
 
 def _issue(
-    response: Response, store: AuthStore, user: dict[str, Any], method: str, settings: Settings
+    response: Response,
+    store: AuthStore,
+    user: dict[str, Any],
+    method: str,
+    settings: Settings,
+    manager_group_ids: tuple[str, ...] | None = None,
+    manager_scope: ManagedScopeProfile | None = None,
 ) -> Profile:
     token, digest = new_session_token()
     authenticated_at = datetime.now(UTC)
@@ -97,6 +106,7 @@ def _issue(
         method=method,
         authenticated_at=authenticated_at,
         expires_at=expires_at,
+        manager_group_ids=manager_group_ids,
     )
     store.touch_last_login(user["id"])
     response.set_cookie(
@@ -115,6 +125,7 @@ def _issue(
         role=user["role"],
         method=method,  # type: ignore[arg-type]
         session_expires_at=expires_at,
+        manager_scope=manager_scope,
     )
 
 
@@ -136,7 +147,12 @@ def login(body: PasswordLogin, response: Response, store: Store, settings: Confi
     dependencies=[Depends(require_allowed_write_origin)],
 )
 def login_with_entra(
-    body: EntraLogin, response: Response, store: Store, verifier: Verifier, settings: Config
+    body: EntraLogin,
+    response: Response,
+    store: Store,
+    verifier: Verifier,
+    settings: Config,
+    repository: Repository,
 ) -> Profile:
     try:
         identity = verifier.verify(body.id_token)
@@ -153,7 +169,11 @@ def login_with_entra(
     user = store.upsert_entra_user(identity.email, identity.display_name, role=role)
     if not user.get("enabled", True):
         raise HTTPException(status_code=403, detail="该账户已被停用。")
-    return _issue(response, store, user, "entra", settings)
+    groups = manager_groups(settings, identity.roles, identity.groups)
+    scope = resolve_manager_scope(groups, repository)
+    return _issue(
+        response, store, user, "entra", settings, groups, scope.profile() if scope else None
+    )
 
 
 @router.post(
@@ -183,7 +203,7 @@ def begin_cli_sign_in(
     identity = identity_for_caller(caller, store, settings)
     code, digest = new_session_token()
     expires_at = datetime.now(UTC) + timedelta(seconds=LOGIN_CODE_SECONDS)
-    store.create_login_code(UUID(identity.id), digest, expires_at)
+    store.create_login_code(UUID(identity.id), digest, expires_at, identity.manager_group_ids)
     return LoginCode(code=code, expires_at=expires_at)
 
 
@@ -193,7 +213,11 @@ def begin_cli_sign_in(
     dependencies=[Depends(require_allowed_write_origin)],
 )
 def redeem_login_code(
-    body: LoginCodeRedeem, response: Response, store: Store, settings: Config
+    body: LoginCodeRedeem,
+    response: Response,
+    store: Store,
+    settings: Config,
+    repository: Repository,
 ) -> Profile:
     """Open the browser session a sign-in code was issued for. A code works once."""
     user = store.consume_login_code(hash_session_token(body.code))
@@ -201,15 +225,19 @@ def redeem_login_code(
         raise HTTPException(
             status_code=401,
             detail=(
-                "This sign-in link has expired or was already used. "
-                "Run the sign-in command again."
+                "This sign-in link has expired or was already used. Run the sign-in command again."
             ),
         )
-    return _issue(response, store, user, "entra", settings)
+    groups = user.get("manager_group_ids") if user["role"] != "owner" else None
+    groups = tuple(groups) if groups is not None else None
+    scope = resolve_manager_scope(groups, repository)
+    return _issue(
+        response, store, user, "entra", settings, groups, scope.profile() if scope else None
+    )
 
 
 @router.get("/api/v1/auth/me", response_model=Profile)
-def whoami(identity: CurrentSession) -> Profile:
+def whoami(identity: CurrentSession, scope: ScopedManager) -> Profile:
     return Profile(
         id=identity.id,
         email=identity.email,
@@ -217,6 +245,7 @@ def whoami(identity: CurrentSession) -> Profile:
         role=identity.role,
         method=identity.method,
         session_expires_at=identity.session_expires_at,
+        manager_scope=scope.profile() if scope else None,
     )
 
 

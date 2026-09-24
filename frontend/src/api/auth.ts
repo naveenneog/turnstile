@@ -10,6 +10,11 @@ export type AuthUser = {
   method: SignInMethod
   /** Absent only while a newly built frontend is talking to a pre-expiry-field API. */
   session_expires_at?: string
+  manager_scope?: {
+    organizations: { id: string; name: string }[]
+    departments: { id: string; name: string; parent_id: string | null }[]
+    writable_department_ids: string[]
+  } | null
 }
 
 async function readProfile(): Promise<AuthUser | null> {

@@ -17,6 +17,7 @@ import type { UsageFilters } from "./types"
 import { BudgetManagementPage } from "./pages/budget-page"
 import { FinOpsDashboard, type FinOpsScope } from "./pages/dashboard-page"
 import { GatewayGovernancePage } from "./pages/gateway-governance-page"
+import { managerPageAllowed } from "../../lib/manager-scope"
 
 export const APIM_SOURCE_ID = "apim" as const
 
@@ -42,7 +43,8 @@ const apimPageIds = new Set([
   "settings",
 ])
 
-export function normalizeApimPage(page: string) {
+export function normalizeApimPage(page: string, scopedManager = false) {
+  if (scopedManager && !managerPageAllowed(page)) return "finops-overview"
   return apimPageIds.has(page) ? page : "finops-overview"
 }
 

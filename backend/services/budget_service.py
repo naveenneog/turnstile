@@ -102,9 +102,7 @@ class TokenBudgetService:
         }
 
     def _entity(self, scope_type: BudgetScopeType, scope_id: str) -> EnterpriseEntity:
-        entity = next(
-            (item for item in self._entities()[scope_type] if item.id == scope_id), None
-        )
+        entity = next((item for item in self._entities()[scope_type] if item.id == scope_id), None)
         if entity is None:
             raise BudgetNotFoundError(f"Unknown {scope_type} budget scope: {scope_id}")
         return entity
@@ -121,7 +119,13 @@ class TokenBudgetService:
         period_days = (period_end - period_start).days
         return round(used_tokens * period_days / elapsed_days)
 
-    def overview(self, period: str, *, include_users: bool = False) -> TokenBudgetResponse:
+    def overview(
+        self,
+        period: str,
+        *,
+        include_users: bool = False,
+        allowed_scopes: dict[BudgetScopeType, frozenset[str]] | None = None,
+    ) -> TokenBudgetResponse:
         period_start, period_end = period_bounds(period)
         budgets = {
             (row["scope_type"], row["scope_id"]): row
@@ -132,13 +136,17 @@ class TokenBudgetService:
             datetime.combine(period_end, time.min, tzinfo=UTC),
         )
         usage = {
-            (row["scope_type"], row["scope_id"]): int(row["used_tokens"])
-            for row in usage_rows
+            (row["scope_type"], row["scope_id"]): int(row["used_tokens"]) for row in usage_rows
         }
         now = datetime.now(UTC)
         items: list[dict[str, Any]] = []
         risk_items: list[dict[str, Any]] = []
         entities = self._entities()
+        if allowed_scopes is not None:
+            entities = {
+                kind: [entity for entity in items if entity.id in allowed_scopes[kind]]
+                for kind, items in entities.items()
+            }
         for scope_type in cast(
             tuple[BudgetScopeType, ...],
             ("organization", "department", "user"),
@@ -148,27 +156,17 @@ class TokenBudgetService:
                 # An unallocated person cannot be warning or exceeded, so the compact
                 # overview only needs to evaluate people who actually have a budget.
                 scoped_entities = [
-                    entity
-                    for entity in scoped_entities
-                    if ("user", entity.id) in budgets
+                    entity for entity in scoped_entities if ("user", entity.id) in budgets
                 ]
             for entity in scoped_entities:
                 budget = budgets.get((scope_type, entity.id))
                 token_limit = int(budget["token_limit"]) if budget else None
-                warning_threshold = (
-                    int(budget["warning_threshold_percent"]) if budget else 80
-                )
+                warning_threshold = int(budget["warning_threshold_percent"]) if budget else 80
                 used_tokens = usage.get((scope_type, entity.id), 0)
-                forecast_tokens = self._forecast_tokens(
-                    used_tokens, period_start, period_end, now
-                )
-                usage_percent = (
-                    round(used_tokens / token_limit * 100, 1) if token_limit else None
-                )
+                forecast_tokens = self._forecast_tokens(used_tokens, period_start, period_end, now)
+                usage_percent = round(used_tokens / token_limit * 100, 1) if token_limit else None
                 forecast_percent = (
-                    round(forecast_tokens / token_limit * 100, 1)
-                    if token_limit
-                    else None
+                    round(forecast_tokens / token_limit * 100, 1) if token_limit else None
                 )
                 if token_limit is None:
                     status = "unallocated"
@@ -232,16 +230,16 @@ class TokenBudgetService:
                 ),
             }
             for row in self._repository.list_token_budget_audit(period_start, 50)
-            if row["action"] != "updated"
-            or row["previous_token_limit"] != row["new_token_limit"]
-            or row["previous_warning_threshold_percent"]
-            != row["new_warning_threshold_percent"]
+            if (allowed_scopes is None or (row["scope_type"], row["scope_id"]) in names)
+            and (
+                row["action"] != "updated"
+                or row["previous_token_limit"] != row["new_token_limit"]
+                or row["previous_warning_threshold_percent"] != row["new_warning_threshold_percent"]
+            )
         ]
         user_names = {entity.id: entity.name for entity in entities["user"]}
         model_identities = self._repository.model_identities()
-        model_names = {
-            key: identity.display_name for key, identity in model_identities.items()
-        }
+        model_names = {key: identity.display_name for key, identity in model_identities.items()}
         model_history = [
             {
                 **row,
@@ -263,22 +261,19 @@ class TokenBudgetService:
                 50,
             )
         ]
-        department_names = {
-            entity.id: entity.name for entity in self._entities()["department"]
-        }
+        department_names = {entity.id: entity.name for entity in entities["department"]}
         enforcement_history = [
             {
                 **row,
                 "event_type": "enforcement",
-                "department_name": department_names.get(
-                    row["department_id"], row["department_id"]
-                ),
+                "department_name": department_names.get(row["department_id"], row["department_id"]),
             }
             for row in self._repository.list_department_enforcement_audit(
                 datetime.combine(period_start, time.min, tzinfo=UTC),
                 datetime.combine(period_end, time.min, tzinfo=UTC),
                 50,
             )
+            if allowed_scopes is None or row["department_id"] in department_names
         ]
         history = sorted(
             [*budget_history, *model_history, *enforcement_history],
@@ -286,8 +281,7 @@ class TokenBudgetService:
             reverse=True,
         )[:50]
         stored_enforcement = {
-            str(row["department_id"]): row
-            for row in self._repository.list_department_enforcement()
+            str(row["department_id"]): row for row in self._repository.list_department_enforcement()
         }
         enforcement = [
             {
@@ -318,9 +312,7 @@ class TokenBudgetService:
         )
 
     @staticmethod
-    def _matches_people_filter(
-        item: TokenBudgetItem, status: PeopleBudgetFilter
-    ) -> bool:
+    def _matches_people_filter(item: TokenBudgetItem, status: PeopleBudgetFilter) -> bool:
         if status == "all":
             return True
         if status == "assigned":
@@ -363,9 +355,7 @@ class TokenBudgetService:
             item.model_copy(
                 update={
                     "model_policy_configured": item.scope_id in policies,
-                    "allowed_model_ids": policies.get(item.scope_id, {}).get(
-                        "model_ids", []
-                    ),
+                    "allowed_model_ids": policies.get(item.scope_id, {}).get("model_ids", []),
                 }
             )
             for item in all_people
@@ -373,9 +363,7 @@ class TokenBudgetService:
         assigned_count = sum(item.token_limit is not None for item in all_people)
         unallocated_count = len(all_people) - assigned_count
         risk_count = sum(item.status in {"warning", "exceeded"} for item in all_people)
-        model_configured_count = sum(
-            item.model_policy_configured for item in all_people
-        )
+        model_configured_count = sum(item.model_policy_configured for item in all_people)
         normalized_query = (query or "").strip().casefold()
         filtered = [
             item
@@ -413,9 +401,7 @@ class TokenBudgetService:
         period_start, _ = period_bounds(period)
         department = self._entity("department", write.department_id)
         all_users = [
-            entity
-            for entity in self._entities()["user"]
-            if entity.parent_id == write.department_id
+            entity for entity in self._entities()["user"] if entity.parent_id == write.department_id
         ]
         overview = self.overview(period, include_users=True)
         user_items = {
@@ -442,19 +428,13 @@ class TokenBudgetService:
             raise BudgetConflictError("No users match the bulk allocation selection")
 
         if write.allocation_mode == "preserve" and write.model_ids is None:
-            raise BudgetConflictError(
-                "Select a budget update or a model access update"
-            )
+            raise BudgetConflictError("Select a budget update or a model access update")
         if write.model_ids is not None:
             enabled_model_ids = {
-                row["id"]
-                for row in self._repository.registry()["models"]
-                if row["enabled"]
+                row["id"] for row in self._repository.registry()["models"] if row["enabled"]
             }
             if not set(write.model_ids).issubset(enabled_model_ids):
-                raise BudgetConflictError(
-                    "One or more selected models are unavailable"
-                )
+                raise BudgetConflictError("One or more selected models are unavailable")
 
         selected_ids = {entity.id for entity in selected}
         token_limit: int | None = None
@@ -465,8 +445,7 @@ class TokenBudgetService:
                 (
                     item
                     for item in overview.items
-                    if item.scope_type == "department"
-                    and item.scope_id == write.department_id
+                    if item.scope_type == "department" and item.scope_id == write.department_id
                 ),
                 None,
             )
@@ -488,9 +467,7 @@ class TokenBudgetService:
                     )
             else:
                 if write.token_limit is None:
-                    raise BudgetConflictError(
-                        "token_limit is required for fixed bulk allocation"
-                    )
+                    raise BudgetConflictError("token_limit is required for fixed bulk allocation")
                 token_limit = write.token_limit
             total_allocated = token_limit * len(selected)
             if total_allocated > available_for_selection:
@@ -519,9 +496,7 @@ class TokenBudgetService:
             updated_count=len(selected),
             token_limit_per_user=token_limit,
             total_allocated=total_allocated,
-            model_policy_updated_count=(
-                len(selected) if write.model_ids is not None else 0
-            ),
+            model_policy_updated_count=(len(selected) if write.model_ids is not None else 0),
         )
 
     def save(
@@ -630,7 +605,5 @@ class TokenBudgetService:
     ) -> TokenBudgetResponse:
         """Returns the whole overview so the caller needs no second round trip."""
         self._entity("department", department_id)
-        self._repository.set_department_enforcement(
-            department_id, write.mode, changed_by
-        )
+        self._repository.set_department_enforcement(department_id, write.mode, changed_by)
         return self.overview(period)

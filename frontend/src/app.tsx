@@ -52,6 +52,7 @@ import { TurnstileMark } from "./components/turnstile-logo";
 import { ApimLogo, CopilotLogo } from "./components/brand-logos";
 import { FINOPS_NAVIGATE_EVENT } from "./lib/navigation";
 import { useAuth } from "./providers/auth-provider";
+import { managerPageAllowed } from "./lib/manager-scope";
 import { dataSource, usageWindow } from "./data-sources/apim/api";
 import {
   finopsQueries,
@@ -845,17 +846,22 @@ function Loading() {
 export function App() {
   const queryClient = useQueryClient();
   const { user, photo, signOut } = useAuth();
+  const scopedManager = user?.manager_scope != null;
   const assistantOwner = user?.email ?? null;
-  const [selectedDataSource, setSelectedDataSource] = useState<DataSource>(dataSourceFromStorage);
-  const [page, setPage] = useState<Page>(() =>
+  const [storedDataSource, setSelectedDataSource] = useState<DataSource>(dataSourceFromStorage);
+  const selectedDataSource = scopedManager ? "apim" : storedDataSource;
+  const [storedPage, setPage] = useState<Page>(() =>
     normalizePageForSource(selectedDataSource, pageFromUrl()));
+  const page = scopedManager ? normalizeApimPage(storedPage, true) as Page : storedPage;
   const routedPage = normalizePageForSource(selectedDataSource, page);
 
   useEffect(() => {
     const syncPageFromUrl = () => {
-      const nextSource = dataSourceFromStorage();
+      const nextSource = scopedManager ? "apim" : dataSourceFromStorage();
       const requestedPage = pageFromUrl();
-      const nextPage = normalizePageForSource(nextSource, requestedPage);
+      const nextPage = scopedManager
+        ? normalizeApimPage(requestedPage, true) as Page
+        : normalizePageForSource(nextSource, requestedPage);
       setSelectedDataSource(nextSource);
       setPage(nextPage);
       if (nextPage !== requestedPage) {
@@ -870,7 +876,7 @@ export function App() {
       window.removeEventListener("popstate", syncPageFromUrl);
       window.removeEventListener(FINOPS_NAVIGATE_EVENT, syncPageFromUrl);
     };
-  }, []);
+  }, [scopedManager]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -923,13 +929,14 @@ export function App() {
   }, [page]);
   const pinnedCharts = useQuery({
     ...pinnedChartsQuery(assistantOwner),
-    enabled: selectedDataSource === "apim" && Boolean(assistantOwner),
+    enabled: !scopedManager && selectedDataSource === "apim" && Boolean(assistantOwner),
   });
   // Open by default, matching SmartHive's `<Collapsible defaultOpen>`. Not persisted for
   // the same reason it is not there: the group is small and re-expanding is one click,
   // whereas a remembered collapse can hide reports a person forgot they had.
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const prefetchNavigation = (nextPage: Page) => {
+    if (scopedManager) return;
     if (selectedDataSource === "github-copilot") {
       prefetchGithubCopilotPage(queryClient, nextPage);
       return;
@@ -956,6 +963,7 @@ export function App() {
   };
 
   const selectDataSource = (next: DataSource) => {
+    if (scopedManager && next !== "apim") return;
     setSelectedDataSource(next);
     setAssistantConversationId(null);
     localStorage.setItem(DATA_SOURCE_STORAGE_KEY, next);
@@ -1063,6 +1071,7 @@ export function App() {
     sidebarDrag.current = null;
   };
   const navigatePage = (next: Page, requestId?: string) => {
+    if (scopedManager && !managerPageAllowed(next)) next = "finops-overview";
     setPage(next);
     const url = new URL(window.location.href);
     url.searchParams.set("page", next);
@@ -1123,7 +1132,7 @@ export function App() {
   });
   useEffect(() => {
     const handleCreateInvocationShortcut = (event: KeyboardEvent) => {
-      if (selectedDataSource !== "apim") return;
+      if (selectedDataSource !== "apim" || scopedManager) return;
       if (event.key.toLowerCase() !== "c" || event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable='true']")) return;
       event.preventDefault();
@@ -1131,7 +1140,7 @@ export function App() {
     };
     document.addEventListener("keydown", handleCreateInvocationShortcut);
     return () => document.removeEventListener("keydown", handleCreateInvocationShortcut);
-  }, [selectedDataSource]);
+  }, [selectedDataSource, scopedManager]);
   const sourcePages = selectedDataSource === "apim" ? apimPages : githubCopilotPages;
   const pageInfo = sourcePages.find((item) => item.id === page) ?? {
     id: page,
@@ -1175,7 +1184,7 @@ export function App() {
       items: sourcePages.map((item) => ({ label: item.label, icon: item.icon, page: item.id })),
     },
   ];
-  if (selectedDataSource === "apim") {
+  if (selectedDataSource === "apim" && !scopedManager) {
     navGroups.push({
       label: "模型平台",
       items: [
@@ -1186,7 +1195,7 @@ export function App() {
       ],
     });
   }
-  navGroups.push({
+  if (!scopedManager) navGroups.push({
     label: "系统管理",
     items: [
       { label: "设置", icon: Settings, page: "settings" },
@@ -1200,9 +1209,9 @@ export function App() {
     // The assistant is listed explicitly for the same reason the invocation console is:
     // this array is derived from navGroups, and both of those live outside them, so
     // neither would otherwise be findable in the palette.
-    { id: "assistant" as Page, label: "FinOps Assistant", icon: Sparkles },
+    ...(!scopedManager ? [{ id: "assistant" as Page, label: "FinOps Assistant", icon: Sparkles }] : []),
     ...navGroups.flatMap((group) => group.items.map((item) => ({ id: item.page, label: item.label, icon: item.icon }))),
-    ...(selectedDataSource === "apim"
+    ...(selectedDataSource === "apim" && !scopedManager
       ? [{ id: "finops-invoke" as Page, label: "调用测试", icon: Zap }]
       : []),
   ];
@@ -1255,10 +1264,10 @@ export function App() {
                     <ApimLogo size={17} />
                     <span>APIM</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => selectDataSource("github-copilot")}>
+                  {!scopedManager && <DropdownMenuItem onClick={() => selectDataSource("github-copilot")}>
                     <CopilotLogo size={17} />
                     <span>GitHub Copilot</span>
-                  </DropdownMenuItem>
+                  </DropdownMenuItem>}
                 </DropdownMenuContent>
               </DropdownMenu>
               <button
@@ -1278,7 +1287,7 @@ export function App() {
                 <kbd><span>⌘</span>K</kbd>
               </button>
             </li>
-            {selectedDataSource === "apim" && <li className="sidebar-menu-item">
+            {!scopedManager && selectedDataSource === "apim" && <li className="sidebar-menu-item">
               <button
                 className="sidebar-menu-button sidebar-quick-action"
                 type="button"
@@ -1313,7 +1322,7 @@ export function App() {
                   the reports group. Chat lives there rather than inside a labelled section
                   because it is a place you go, not a report you read -- and a label would
                   imply a category that has one member. */}
-              <div className="nav-group sidebar-group" key="assistant">
+              {!scopedManager && <div className="nav-group sidebar-group" key="assistant">
                 <div className="sidebar-group-content">
                   <ul className="sidebar-menu sidebar-nav-menu">
                     <li className="sidebar-menu-item">
@@ -1330,8 +1339,8 @@ export function App() {
                     </li>
                   </ul>
                 </div>
-              </div>
-              {selectedDataSource === "apim" && pinnedCharts.data && pinnedCharts.data.length > 0 && (
+              </div>}
+              {!scopedManager && selectedDataSource === "apim" && pinnedCharts.data && pinnedCharts.data.length > 0 && (
                 <div className="nav-group sidebar-group pinned-group" key="pinned">
                     {/* Mirrors SmartHive's pinned group interaction, but names this report-only
                       collection by its resource. The label itself is the trigger, the caret
@@ -1523,7 +1532,7 @@ export function App() {
       {/* SmartHive's `isFloatingChatRouteSuppressed`, and for its reason: the full page
           already owns this conversation, so a floating copy of it would be duplication
           the reader has to reconcile. */}
-      {page !== "assistant" && (
+      {!scopedManager && page !== "assistant" && (
         <AssistantPanel
           key={selectedDataSource}
           source={selectedDataSource}

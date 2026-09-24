@@ -37,22 +37,26 @@ from turnstile_core.domain.models import (
 from turnstile_core.persistence.repository import UsageFilters
 
 from .dependencies import Repository
+from .manager_scope import ScopedManager
 from .session import (
     Config,
     OwnerSession,
     require_allowed_write_origin,
     require_authenticated_session,
+    require_manager_route,
 )
 
 router = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )
 
 
 def usage_filters(
+    scope: ScopedManager,
     organization_id: str | None = None,
     department_id: str | None = None,
     project_id: str | None = None,
@@ -62,6 +66,16 @@ def usage_filters(
     runtime: Annotated[list[str] | None, Query()] = None,
     status_code: Annotated[int | None, Query(ge=100, le=599)] = None,
 ) -> UsageFilters:
+    if scope is not None:
+        for value, allowed in (
+            (organization_id, scope.organization_ids),
+            (department_id, scope.department_ids),
+            (user_id, scope.budget_scopes["user"]),
+            (project_id, {project.id for project in scope.entities.projects}),
+            (agent_id, {agent.id for agent in scope.entities.agents}),
+        ):
+            if value is not None and value not in allowed:
+                raise HTTPException(status_code=403, detail="Filter is outside your managed scope")
     return UsageFilters(
         organization_id=organization_id,
         department_id=department_id,
@@ -71,6 +85,8 @@ def usage_filters(
         user_id=user_id,
         runtime=tuple(runtime) if runtime else None,
         status_code=status_code,
+        managed_organization_ids=scope.organization_ids if scope is not None else None,
+        managed_department_ids=scope.department_ids if scope is not None else None,
     )
 
 
@@ -79,8 +95,10 @@ UsageFilterSet = Annotated[UsageFilters, Depends(usage_filters)]
 
 @router.get("/api/v1/enterprise/entities", response_model=EnterpriseEntityCatalog)
 def get_enterprise_entities(
-    repository: Repository, settings: Config
+    repository: Repository, settings: Config, scope: ScopedManager
 ) -> EnterpriseEntityCatalog:
+    if scope is not None:
+        return scope.entities
     catalog = merge_application_owners(
         merge_observed_users(
             resolve_enterprise_catalog(repository.enterprise_entities()),
@@ -124,9 +142,7 @@ def get_distribution(
         "organization", "department", "project", "agent", "model", "user", "runtime"
     ],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    split_by: Literal[
-        "organization", "department", "project", "agent", "model", "user", "runtime"
-    ]
+    split_by: Literal["organization", "department", "project", "agent", "model", "user", "runtime"]
     | None = None,
 ) -> DistributionResponse:
     return DistributionResponse.model_validate(
@@ -134,9 +150,7 @@ def get_distribution(
             "from": from_,
             "to": to,
             "dimension": dimension,
-            "items": repository.distribution(
-                from_, to, dimension, filters, limit, split_by
-            ),
+            "items": repository.distribution(from_, to, dimension, filters, limit, split_by),
         }
     )
 
@@ -159,10 +173,14 @@ def list_usage_requests(
 
 
 @router.get("/api/v1/observability/requests/{request_id}", response_model=UsageRequestDetail)
-def get_usage_request(request_id: str, repository: Repository) -> UsageRequestDetail:
+def get_usage_request(
+    request_id: str, repository: Repository, scope: ScopedManager
+) -> UsageRequestDetail:
     row = repository.get_usage_request(request_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Usage request not found")
+    if scope is not None and not scope.contains_usage(row):
+        raise HTTPException(status_code=403, detail="Request is outside your managed scope")
     return UsageRequestDetail.model_validate(row)
 
 

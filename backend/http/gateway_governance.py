@@ -31,6 +31,7 @@ from .session import (
     OwnerSession,
     require_allowed_write_origin,
     require_authenticated_session,
+    require_manager_route,
 )
 
 
@@ -53,6 +54,7 @@ def request_gateway_apply(
 router = APIRouter(
     dependencies=[
         Depends(require_authenticated_session),
+        Depends(require_manager_route),
         Depends(require_allowed_write_origin),
     ]
 )

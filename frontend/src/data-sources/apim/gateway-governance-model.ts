@@ -40,6 +40,37 @@ export const UNASSIGNED_ID = "unassigned"
 // The gateway's own rule: an id becomes a counter key and a map key, so letters, digits
 // and hyphens only.
 const ID = /^[a-z0-9][a-z0-9-]{0,63}$/
+const OBJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export type GovernanceChange = {
+  managerGroupId?: string
+  enforcement?: "" | "strict" | "allowance" | "notify"
+  allowancePercent?: number
+}
+
+export function governanceOf(entity?: CatalogEntity): GovernanceChange {
+  return {
+    managerGroupId: String(entity?.attributes?.manager_group_id ?? ""),
+    enforcement: (entity?.attributes?.enforcement ?? "") as GovernanceChange["enforcement"],
+    allowancePercent: Number(entity?.attributes?.allowance_percent ?? 10),
+  }
+}
+
+function withGovernance(entity: CatalogEntity, change: GovernanceChange): CatalogEntity {
+  if (change.managerGroupId === undefined && change.enforcement === undefined) return entity
+  const attributes = { ...entity.attributes }
+  if (change.managerGroupId !== undefined) {
+    if (change.managerGroupId.trim()) attributes.manager_group_id = change.managerGroupId.trim().toLowerCase()
+    else delete attributes.manager_group_id
+  }
+  if (change.enforcement !== undefined) {
+    if (change.enforcement) attributes.enforcement = change.enforcement
+    else delete attributes.enforcement
+    if (change.enforcement === "allowance") attributes.allowance_percent = change.allowancePercent as number
+    else delete attributes.allowance_percent
+  }
+  return { ...entity, attributes }
+}
 
 export function groupOf(entity: CatalogEntity): string {
   const ref = entity.external_ref ?? ""
@@ -100,7 +131,7 @@ export function toWrite(catalog: EnterpriseCatalogWrite): EnterpriseCatalogWrite
 
 export function problemsFor(
   catalog: EnterpriseCatalogWrite,
-  change: { kind: "unit" | "team"; id: string; name: string; group: string; parentId?: string; editing?: string },
+  change: { kind: "unit" | "team"; id: string; name: string; group: string; parentId?: string; editing?: string } & GovernanceChange,
 ): string[] {
   const problems: string[] = []
   if (!ID.test(change.id)) problems.push("Use lower-case letters, digits and hyphens for the id")
@@ -116,18 +147,27 @@ export function problemsFor(
     (e) => e.id !== change.editing && groupOf(e).toLowerCase() === change.group.trim().toLowerCase(),
   )
   if (groupTaken) problems.push(`The group ${change.group.trim()} is already used by another unit or team`)
+  if (change.managerGroupId?.trim() && !OBJECT_ID.test(change.managerGroupId.trim()))
+    problems.push("Manager group must be an Entra group object id")
+  if (change.enforcement && !["strict", "allowance", "notify"].includes(change.enforcement))
+    problems.push("Choose strict, allowance or notify enforcement")
+  if (change.enforcement === "allowance" && (!Number.isInteger(change.allowancePercent) || (change.allowancePercent ?? 0) < 1 || (change.allowancePercent ?? 0) > 100))
+    problems.push("Allowance must be a whole percentage from 1 to 100")
+  const original = (change.kind === "unit" ? catalog.organizations : catalog.departments).find((e) => e.id === change.editing)
+  const updated = withGovernance(original ?? { id: change.id, name: change.name }, change)
+  if (Object.keys(updated.attributes ?? {}).length > 20) problems.push("At most 20 attributes are allowed")
   return problems
 }
 
 export function saveUnit(
   catalog: EnterpriseCatalogWrite,
-  unit: { id: string; name: string; group: string },
+  unit: { id: string; name: string; group: string } & GovernanceChange,
   editing?: string,
 ): EnterpriseCatalogWrite {
   const entity: CatalogEntity = { id: unit.id, name: unit.name.trim(), external_ref: GROUP_PREFIX + unit.group.trim() }
   const organizations = editing
-    ? catalog.organizations.map((o) => (o.id === editing ? { ...o, ...entity } : o))
-    : [...catalog.organizations.filter((o) => o.id !== UNASSIGNED_ID), entity, ...catalog.organizations.filter((o) => o.id === UNASSIGNED_ID)]
+    ? catalog.organizations.map((o) => (o.id === editing ? withGovernance({ ...o, ...entity }, unit) : o))
+    : [...catalog.organizations.filter((o) => o.id !== UNASSIGNED_ID), withGovernance(entity, unit), ...catalog.organizations.filter((o) => o.id === UNASSIGNED_ID)]
   let departments = catalog.departments
   if (editing && editing !== unit.id) {
     departments = departments.map((d) => ({
@@ -154,7 +194,7 @@ export function removeUnit(catalog: EnterpriseCatalogWrite, id: string): Enterpr
 
 export function saveTeam(
   catalog: EnterpriseCatalogWrite,
-  team: { id: string; name: string; group: string; parentId: string },
+  team: { id: string; name: string; group: string; parentId: string } & GovernanceChange,
   editing?: string,
 ): EnterpriseCatalogWrite {
   const entity: CatalogEntity = {
@@ -164,8 +204,8 @@ export function saveTeam(
     external_ref: GROUP_PREFIX + team.group.trim(),
   }
   const departments = editing
-    ? catalog.departments.map((d) => (d.id === editing ? { ...d, ...entity } : d))
-    : [...catalog.departments, entity]
+    ? catalog.departments.map((d) => (d.id === editing ? withGovernance({ ...d, ...entity }, team) : d))
+    : [...catalog.departments, withGovernance(entity, team)]
   return { ...catalog, departments }
 }
 

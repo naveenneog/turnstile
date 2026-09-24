@@ -30,6 +30,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 import httpx
 import jwt
@@ -71,8 +72,13 @@ def hash_password(password: str) -> str:
         raise AuthError("密码不能为空。")
     salt = secrets.token_bytes(SCRYPT_SALT_BYTES)
     key = hashlib.scrypt(
-        password.encode("utf-8"), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P,
-        maxmem=SCRYPT_MAXMEM, dklen=SCRYPT_KEY_BYTES,
+        password.encode("utf-8"),
+        salt=salt,
+        n=SCRYPT_N,
+        r=SCRYPT_R,
+        p=SCRYPT_P,
+        maxmem=SCRYPT_MAXMEM,
+        dklen=SCRYPT_KEY_BYTES,
     )
     encode = _b64
     return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${encode(salt)}${encode(key)}"
@@ -95,8 +101,13 @@ def verify_password(password: str, stored: str | None) -> bool:
         salt = pad(salt_b64)
         expected = pad(key_b64)
         candidate = hashlib.scrypt(
-            password.encode("utf-8"), salt=salt, n=int(n), r=int(r), p=int(p),
-            maxmem=SCRYPT_MAXMEM, dklen=len(expected),
+            password.encode("utf-8"),
+            salt=salt,
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            maxmem=SCRYPT_MAXMEM,
+            dklen=len(expected),
         )
     except (ValueError, TypeError):
         return False
@@ -126,6 +137,26 @@ class EntraIdentity:
     # The app roles assigned to the signer for this registration, from the token's `roles`
     # claim. Empty when none are assigned or the registration defines none.
     roles: tuple[str, ...] = ()
+    groups: tuple[str, ...] = ()
+
+
+def _claim_groups(claims: dict[str, Any]) -> tuple[str, ...]:
+    # Never follow overage URLs or interpret a missing/malformed claim as unrestricted.
+    names = claims.get("_claim_names")
+    if "hasgroups" in claims or (isinstance(names, dict) and "groups" in names):
+        return ()
+    raw = claims.get("groups")
+    if not isinstance(raw, list):
+        return ()
+    groups: set[str] = set()
+    for value in raw:
+        if not isinstance(value, str):
+            continue
+        try:
+            groups.add(str(UUID(value)))
+        except ValueError:
+            continue
+    return tuple(sorted(groups))
 
 
 class EntraTokenVerifier:
@@ -192,7 +223,10 @@ class EntraTokenVerifier:
             raise AuthError("Microsoft 登录未能完成，请重试。") from error
 
         tenant_id = str(claims.get("tid") or "")
-        if not tenant_id or claims.get("iss") != f"https://login.microsoftonline.com/{tenant_id}/v2.0":
+        if (
+            not tenant_id
+            or claims.get("iss") != f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        ):
             # Without this a token from one tenant could carry another tenant's `tid`, and
             # anything downstream that trusted `tid` would be reading an attacker's value.
             raise AuthError("该账户不属于此组织。")
@@ -214,6 +248,7 @@ class EntraTokenVerifier:
             display_name=str(claims["name"]).strip() if claims.get("name") else None,
             tenant_id=tenant_id,
             roles=roles,
+            groups=_claim_groups(claims),
         )
 
     def _domain_allowed(self, email: str) -> bool:
@@ -258,6 +293,7 @@ class EntraCaller:
     roles: tuple[str, ...]
     delegated: bool
     expires_at: datetime
+    groups: tuple[str, ...] = ()
 
 
 class EntraAccessTokenVerifier:
@@ -334,4 +370,5 @@ class EntraAccessTokenVerifier:
             roles=roles,
             delegated=delegated,
             expires_at=datetime.fromtimestamp(int(claims["exp"]), UTC),
+            groups=_claim_groups(claims),
         )

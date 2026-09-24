@@ -172,6 +172,9 @@ param entraTenantId string = ''
 @description('Entra app role required to sign in with Microsoft. Empty keeps automatic Member provisioning; when set, only holders sign in, as Owner.')
 param entraAdminRole string = ''
 
+@description('Azure resource id of a Claude gateway\'s apply job. When set, saving the organization catalog, an organization or department budget, or the gateway tiers starts it. The API\'s managed identity needs Container Apps Jobs Operator on the job.')
+param gatewayApplyJobId string = ''
+
 @description('Email address for the first password Owner created only when the user table is empty.')
 param bootstrapOwnerEmail string
 
@@ -286,6 +289,7 @@ module dataPlane 'modules/data-plane.bicep' = {
     entraAllowedEmailDomains: entraAllowedEmailDomains
     entraTenantId: entraTenantId
     entraAdminRole: entraAdminRole
+    gatewayApplyJobId: gatewayApplyJobId
     bootstrapOwnerEmail: bootstrapOwnerEmail
     bootstrapOwnerPasswordHash: bootstrapOwnerPasswordHash
   }

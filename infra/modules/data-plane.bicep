@@ -37,6 +37,7 @@ param entraClientId string = ''
 param entraAllowedEmailDomains array = []
 param entraTenantId string = ''
 param entraAdminRole string = ''
+param gatewayApplyJobId string = ''
 param bootstrapOwnerEmail string
 @secure()
 param bootstrapOwnerPasswordHash string
@@ -671,6 +672,7 @@ resource api 'Microsoft.Web/sites@2024-11-01' = {
         { name: 'ENTRA_ALLOWED_EMAIL_DOMAINS', value: string(entraAllowedEmailDomains) }
         { name: 'ENTRA_TENANT_IDS', value: string(empty(entraTenantId) ? [] : [entraTenantId]) }
         { name: 'ENTRA_ADMIN_ROLE', value: entraAdminRole }
+        { name: 'GATEWAY_APPLY_JOB_ID', value: gatewayApplyJobId }
         { name: 'BOOTSTRAP_OWNER_EMAIL', value: bootstrapOwnerEmail }
         { name: 'BOOTSTRAP_OWNER_PASSWORD_HASH', value: bootstrapOwnerPasswordHash }
         { name: 'PRODUCTION', value: 'true' }

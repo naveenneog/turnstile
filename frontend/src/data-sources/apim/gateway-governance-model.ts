@@ -37,7 +37,9 @@ export type GatewayTier = {
 
 const GROUP_PREFIX = "entra-group:"
 export const UNASSIGNED_ID = "unassigned"
-const ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
+// The gateway's own rule: an id becomes a counter key and a map key, so letters, digits
+// and hyphens only.
+const ID = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 export function groupOf(entity: CatalogEntity): string {
   const ref = entity.external_ref ?? ""
@@ -101,7 +103,7 @@ export function problemsFor(
   change: { kind: "unit" | "team"; id: string; name: string; group: string; parentId?: string; editing?: string },
 ): string[] {
   const problems: string[] = []
-  if (!ID.test(change.id)) problems.push("Use lower-case letters, digits, dot, dash or underscore for the id")
+  if (!ID.test(change.id)) problems.push("Use lower-case letters, digits and hyphens for the id")
   if (!change.name.trim()) problems.push("Give it a name")
   if (!change.group.trim()) problems.push("Name the Entra group whose members belong to it")
   const taken = [...catalog.organizations, ...catalog.departments].some(

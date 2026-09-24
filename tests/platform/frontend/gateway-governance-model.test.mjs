@@ -74,6 +74,7 @@ test("problems are named before anything is saved", () => {
   const c = saveUnit(empty, { id: "sales", name: "Sales", group: "claude-bu-sales" })
   const bad = problemsFor(c, { kind: "unit", id: "Has Space", name: " ", group: "" })
   assert.ok(bad.some((p) => p.includes("lower-case")))
+  assert.ok(problemsFor(c, { kind: "unit", id: "sales_emea", name: "S", group: "g7" }).some((p) => p.includes("hyphens")))
   assert.ok(bad.some((p) => p.includes("Give it a name")))
   assert.ok(bad.some((p) => p.includes("Entra group")))
   assert.ok(problemsFor(c, { kind: "unit", id: "sales", name: "Again", group: "other" }).some((p) => p.includes("already used")))

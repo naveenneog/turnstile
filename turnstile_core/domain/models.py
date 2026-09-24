@@ -357,6 +357,15 @@ class GatewayApplyStatus(StrictModel):
     executions_error: str | None = None
 
 
+class GatewayGovernancePrepared(StrictModel):
+    """The month a gateway should read budgets for, after it has had its budgets rolled in."""
+
+    period: str
+    # True when this call gave the month its budgets; false when that had already happened.
+    inherited_now: bool
+    inherited_scopes: int | None = None
+
+
 BudgetScopeType = Literal["organization", "department", "user"]
 BudgetStatus = Literal["unallocated", "healthy", "warning", "exceeded"]
 PeopleBudgetFilter = Literal["all", "assigned", "unallocated", "healthy", "warning", "exceeded"]

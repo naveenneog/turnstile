@@ -293,6 +293,50 @@ def test_only_an_owner_applies_by_hand(
     assert client.get("/api/v1/gateway-apply").status_code == 200
 
 
+# --- the month a gateway reads ---------------------------------------------------------
+
+
+def _month_before(period_start: date) -> date:
+    return (period_start - timedelta(days=1)).replace(day=1)
+
+
+def test_prepare_gives_the_month_its_budgets_before_the_timer(
+    repository: InMemoryRepository,
+) -> None:
+    # A new month has no budgets until the roll-forward; a gateway reading it then would
+    # remove every budget. Prepare runs that roll-forward first, exactly once.
+    current = datetime.now(UTC).date().replace(day=1)
+    repository.upsert_token_budget(
+        _month_before(current), "organization", "sales", None, 900, 80, "owner@contoso.com"
+    )
+    _as("owner")
+    first = client.post("/api/v1/gateway-governance/prepare", headers=ORIGIN)
+    assert first.status_code == 200
+    assert first.json() == {"period": PERIOD, "inherited_now": True, "inherited_scopes": 1}
+    assert repository.token_budgets[(current, "organization", "sales")]["token_limit"] == 900
+    again = client.post("/api/v1/gateway-governance/prepare", headers=ORIGIN).json()
+    assert again == {"period": PERIOD, "inherited_now": False, "inherited_scopes": None}
+
+
+def test_prepare_never_brings_back_a_budget_removed_this_month(
+    repository: InMemoryRepository,
+) -> None:
+    current = datetime.now(UTC).date().replace(day=1)
+    repository.upsert_token_budget(
+        _month_before(current), "organization", "sales", None, 900, 80, "owner@contoso.com"
+    )
+    _as("owner")
+    client.post("/api/v1/gateway-governance/prepare", headers=ORIGIN)
+    assert repository.delete_token_budget(current, "organization", "sales", "owner@contoso.com")
+    client.post("/api/v1/gateway-governance/prepare", headers=ORIGIN)
+    assert (current, "organization", "sales") not in repository.token_budgets
+
+
+def test_only_an_owner_prepares(repository: InMemoryRepository) -> None:
+    _as("member")
+    assert client.post("/api/v1/gateway-governance/prepare", headers=ORIGIN).status_code == 403
+
+
 # --- the trigger, against a fake Azure -------------------------------------------------
 
 

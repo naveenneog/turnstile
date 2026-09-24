@@ -7,6 +7,7 @@ apply job, so the change reaches the gateway without anyone running a script.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Annotated
 
@@ -17,10 +18,12 @@ from turnstile_core.domain.gateway import tier_rows, tier_write_problems, tiers_
 from turnstile_core.domain.models import (
     GatewayApplyRequest,
     GatewayApplyStatus,
+    GatewayGovernancePrepared,
     GatewayTiersResponse,
     GatewayTiersWrite,
 )
 from turnstile_core.integrations.gateway_apply import GatewayApplyTrigger
+from turnstile_core.integrations.ledger import ROLL_FORWARD_ACTOR, period_start_for
 
 from .dependencies import Repository
 from .session import (
@@ -87,3 +90,24 @@ def post_gateway_apply(identity: OwnerSession, apply: GatewayApply) -> GatewayAp
     if not apply.configured:
         raise HTTPException(status_code=409, detail="No gateway apply job is configured")
     return apply.request(f"applied by {identity.email}")
+
+
+@router.post("/api/v1/gateway-governance/prepare", response_model=GatewayGovernancePrepared)
+def prepare_gateway_governance(
+    repository: Repository, identity: OwnerSession
+) -> GatewayGovernancePrepared:
+    """Give the current month its budgets before a gateway reads them.
+
+    Budgets are monthly, and a month inherits the previous month's from a timer that runs
+    every five minutes. Until it has, the month has no budgets at all, and a gateway applying
+    Turnstile would read that as every budget removed. This runs the same exactly-once
+    roll-forward the timer runs, so the month a gateway reads has always had its chance to
+    inherit, and returns that month so the gateway reads the one Turnstile means.
+    """
+    period_start = period_start_for(datetime.now(UTC))
+    rolled = repository.roll_forward_budgets(period_start, ROLL_FORWARD_ACTOR)
+    return GatewayGovernancePrepared(
+        period=period_start.strftime("%Y-%m"),
+        inherited_now=rolled is not None,
+        inherited_scopes=int(rolled["scope_count"]) if rolled is not None else None,
+    )

@@ -107,8 +107,8 @@ def test_every_business_api_route_requires_the_shared_session_dependency() -> No
     ]
 
     # 86, the organization catalog's GET, PUT and DELETE, and gateway governance's
-    # tiers GET and PUT and apply GET and POST.
-    assert len(apim_routes) == 93
+    # tiers GET and PUT, apply GET and POST, and prepare POST.
+    assert len(apim_routes) == 94
     adoption = next(
         route for route in apim_routes
         if route.path == "/api/v1/model-management/connections/{runtime_id}/adopt"

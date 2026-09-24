@@ -4,6 +4,7 @@ import {
   ChartPie,
   LayoutDashboard,
   LineChart,
+  Network,
   ShieldAlert,
   WalletCards,
   type LucideIcon,
@@ -15,12 +16,14 @@ import { prefetchPage, type PrefetchablePage } from "./queries"
 import type { UsageFilters } from "./types"
 import { BudgetManagementPage } from "./pages/budget-page"
 import { FinOpsDashboard, type FinOpsScope } from "./pages/dashboard-page"
+import { GatewayGovernancePage } from "./pages/gateway-governance-page"
 
 export const APIM_SOURCE_ID = "apim" as const
 
 export const apimPages = [
   { id: "finops-overview", label: "管理总览", icon: LayoutDashboard },
   { id: "budgets", label: "预算管理", icon: WalletCards },
+  { id: "gateway-governance", label: "Gateway governance", icon: Network },
   { id: "finops-analytics", label: "用量分布", icon: ChartPie },
   { id: "finops-trends", label: "使用趋势", icon: LineChart },
   { id: "finops-governance", label: "异常治理", icon: ShieldAlert },
@@ -89,6 +92,9 @@ export function renderApimPage({
 }): ReactNode {
   if (page === "budgets") {
     return <BudgetManagementPage onToggleSidebar={onToggleSidebar} />
+  }
+  if (page === "gateway-governance") {
+    return <GatewayGovernancePage onToggleSidebar={onToggleSidebar} />
   }
   if (!page.startsWith("finops-")) return null
   return <FinOpsDashboard

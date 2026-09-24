@@ -115,6 +115,7 @@ type Page =
   | "gateway-releases"
   | "applications"
   | "budgets"
+  | "gateway-governance"
   | "assistant"
   | "pinned-report"
   | "finops-overview"
@@ -152,6 +153,7 @@ const pageIds: Page[] = [
   "gateway-releases",
   "applications",
   "budgets",
+  "gateway-governance",
   "assistant",
   "pinned-report",
   "finops-overview",

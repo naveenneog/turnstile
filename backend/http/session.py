@@ -11,7 +11,13 @@ from fastapi import Depends, HTTPException, Request
 from turnstile_core.config import Settings, get_settings
 from turnstile_core.persistence.auth_store import AuthStore
 
-from ..services.auth_service import AuthError, EntraAccessTokenVerifier, hash_session_token
+from ..services.auth_service import (
+    AuthError,
+    EntraAccessTokenVerifier,
+    EntraCaller,
+    hash_session_token,
+)
+from .entra_roles import console_role
 
 
 @lru_cache
@@ -57,30 +63,37 @@ def _bearer_token(request: Request) -> str | None:
     return token.strip() or None
 
 
-def _token_identity(
-    token: str, store: AuthStore, settings: Settings, verifier: EntraAccessTokenVerifier
-) -> SessionIdentity:
-    """An Entra access token in place of a session, for scripts and automation.
+def verify_caller(
+    token: str, settings: Settings, verifier: EntraAccessTokenVerifier
+) -> EntraCaller:
+    """A verified Entra access token, on a deployment that accepts them at all.
 
-    Accepted only on an admin-only, tenant-pinned deployment, and only with the admin
-    role -- so it is exactly as strong as signing in, never weaker, and a deployment that
-    has not opted in behaves as it always did.
+    Accepted only on an admin-only, tenant-pinned deployment, so a token is exactly as
+    strong as signing in, never weaker, and a deployment that has not opted in behaves as
+    it always did.
     """
     if not settings.entra_admin_role or not settings.entra_tenant_ids:
         raise HTTPException(status_code=401, detail="未登录。")
     try:
-        caller = verifier.verify(token)
+        return verifier.verify(token)
     except AuthError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
-    if settings.entra_admin_role not in caller.roles:
+
+
+def identity_for_caller(
+    caller: EntraCaller, store: AuthStore, settings: Settings
+) -> SessionIdentity:
+    """Who a verified token is, in the console role its app role grants."""
+    role = console_role(settings, caller.roles)
+    if role is None:
         raise HTTPException(status_code=403, detail="此控制台仅限管理员使用。")
     subject = caller.subject
     if caller.delegated:
-        # The same person signing in would be provisioned as Owner; a token must not give
-        # them an identity that the rest of the application cannot find.
+        # The same person signing in would be provisioned with this role; a token must not
+        # give them an identity that the rest of the application cannot find.
         user = store.find_user_by_email(caller.email)
-        if not user or user.get("role") != "owner":
-            user = store.upsert_entra_user(caller.email, caller.display_name, role="owner")
+        if not user or user.get("role") != role:
+            user = store.upsert_entra_user(caller.email, caller.display_name, role=role)
         if not user.get("enabled", True):
             raise HTTPException(status_code=403, detail="该账户已被停用。")
         subject = str(user["id"])
@@ -88,10 +101,17 @@ def _token_identity(
         id=subject,
         email=caller.email,
         name=caller.display_name,
-        role="owner",
+        role=role,
         method="entra",
         session_expires_at=caller.expires_at,
     )
+
+
+def _token_identity(
+    token: str, store: AuthStore, settings: Settings, verifier: EntraAccessTokenVerifier
+) -> SessionIdentity:
+    """An Entra access token in place of a session, for scripts and automation."""
+    return identity_for_caller(verify_caller(token, settings, verifier), store, settings)
 
 
 def require_authenticated_session(

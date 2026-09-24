@@ -6,6 +6,7 @@ import {
 } from "@azure/msal-browser"
 import { authApi, type AuthUser, type SignInMethod } from "../api/auth"
 import { SESSION_EXPIRED_EVENT } from "../api/client"
+import { splitLoginCode } from "./login-code"
 
 export type { AuthUser, SignInMethod } from "../api/auth"
 
@@ -117,6 +118,19 @@ function resolveIdentity(): Promise<AuthUser | null> {
   // Checking the session first would leave the returning token unread and drop the person
   // back on the sign-in page having just signed in.
   identity ??= (async () => {
+    // A link from `Open-ClaudeTurnstile.ps1`: the Azure CLI's token was exchanged for a
+    // single-use code, for a tenant whose Microsoft sign-in has no consent yet. Taken out
+    // of the address before anything else, so a reload never tries it twice.
+    const { code, rest } = splitLoginCode(window.location.search)
+    if (code) {
+      window.history.replaceState(null, "", `${window.location.pathname}${rest}${window.location.hash}`)
+      try {
+        return await authApi.redeemLoginCode(code)
+      } catch (error) {
+        entraRejection = error instanceof Error ? error.message : "登录失败，请重试。"
+        return null
+      }
+    }
     await initialiseMsal()
     const redirect = await msal.handleRedirectPromise().catch(() => null)
     if (redirect?.idToken) {

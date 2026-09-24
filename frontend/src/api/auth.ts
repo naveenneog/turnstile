@@ -38,6 +38,7 @@ export const authApi = {
     postIdentity("/api/v1/auth/login", { email, password }),
   exchangeEntraToken: (idToken: string) =>
     postIdentity("/api/v1/auth/entra", { id_token: idToken }),
+  redeemLoginCode: (code: string) => postIdentity("/api/v1/auth/code", { code }),
   signOut: async () => {
     await fetch(apiUrl("/api/v1/auth/logout"), {
       method: "POST",

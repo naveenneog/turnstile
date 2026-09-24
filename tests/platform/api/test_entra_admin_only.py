@@ -178,3 +178,66 @@ def test_the_store_writes_the_role_the_token_proved() -> None:
     assert "INSERT INTO app_user (email, display_name, role)" in source
     assert "role = EXCLUDED.role" in source
     assert "enabled = EXCLUDED" not in source
+
+
+# --- viewers and managers --------------------------------------------------------------
+
+VIEWER_ROLE = "Turnstile.Viewer"
+MANAGER_ROLE = "Turnstile.Manager"
+
+
+@pytest.fixture
+def with_readers() -> Iterator[CapturingAuthStore]:
+    store = CapturingAuthStore(role="member")
+    settings = Settings(
+        entra_admin_role=ADMIN_ROLE,
+        entra_viewer_role=VIEWER_ROLE,
+        entra_manager_role=MANAGER_ROLE,
+        entra_tenant_ids=[TENANT],
+    )
+    app.dependency_overrides[get_auth_store] = lambda: store
+    app.dependency_overrides[get_settings] = lambda: settings
+    yield store
+    client.cookies.clear()
+    for dependency in (get_auth_store, get_settings, get_entra_verifier):
+        app.dependency_overrides.pop(dependency, None)
+
+
+@pytest.mark.parametrize("role", [VIEWER_ROLE, MANAGER_ROLE])
+def test_a_viewer_or_a_manager_signs_in_as_a_member(
+    with_readers: CapturingAuthStore, role: str
+) -> None:
+    app.dependency_overrides[get_entra_verifier] = lambda: RoleVerifier((role,))
+    response = client.post("/api/v1/auth/entra", headers=ORIGIN, json={"id_token": "t"})
+
+    assert response.status_code == 200
+    assert with_readers.entra_upserts == [{"email": "admin@contoso.com", "role": "member"}]
+
+
+def test_the_admin_role_outranks_a_reader_role(with_readers: CapturingAuthStore) -> None:
+    app.dependency_overrides[get_entra_verifier] = lambda: RoleVerifier((VIEWER_ROLE, ADMIN_ROLE))
+    response = client.post("/api/v1/auth/entra", headers=ORIGIN, json={"id_token": "t"})
+
+    assert response.status_code == 200
+    assert with_readers.entra_upserts == [{"email": "admin@contoso.com", "role": "owner"}]
+
+
+def test_a_developer_with_no_console_role_still_never_signs_in(
+    with_readers: CapturingAuthStore,
+) -> None:
+    app.dependency_overrides[get_entra_verifier] = lambda: RoleVerifier(())
+    response = client.post("/api/v1/auth/entra", headers=ORIGIN, json={"id_token": "t"})
+
+    assert response.status_code == 403
+    assert with_readers.entra_upserts == []
+    assert with_readers.sessions == []
+
+
+def test_a_reader_role_is_refused_until_the_deployment_names_it(
+    admin_only: CapturingAuthStore,
+) -> None:
+    app.dependency_overrides[get_entra_verifier] = lambda: RoleVerifier((VIEWER_ROLE,))
+    response = client.post("/api/v1/auth/entra", headers=ORIGIN, json={"id_token": "t"})
+
+    assert response.status_code == 403
+    assert admin_only.entra_upserts == []

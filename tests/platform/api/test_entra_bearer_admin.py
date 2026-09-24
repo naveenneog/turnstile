@@ -164,3 +164,33 @@ def test_another_authorization_scheme_is_not_a_token() -> None:
     assert response.status_code == 401
     assert response.json()["detail"] == "未登录。"
     assert store.entra_upserts == []
+
+
+# --- viewers and managers --------------------------------------------------------------
+
+VIEWER = "Turnstile.Viewer"
+MANAGER = "Turnstile.Manager"
+
+
+@pytest.mark.parametrize("role", [VIEWER, MANAGER])
+def test_a_viewers_or_managers_token_reads_as_a_member(role: str) -> None:
+    store = _configure(entra_viewer_role=VIEWER, entra_manager_role=MANAGER)
+    response = _me(_token(roles=[role]))
+    assert response.status_code == 200
+    assert response.json()["role"] == "member"
+    assert store.entra_upserts == [{"email": "admin@contoso.com", "role": "member"}]
+
+
+def test_a_viewers_token_cannot_do_what_an_owner_does() -> None:
+    _configure(entra_viewer_role=VIEWER)
+    token = _token(roles=[VIEWER])
+    response = client.post("/api/v1/gateway-apply", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 403
+
+
+def test_a_viewer_workload_reads_as_a_member() -> None:
+    store = _configure(entra_viewer_role=VIEWER)
+    response = _me(_token(delegated=False, roles=[VIEWER]))
+    assert response.status_code == 200
+    assert response.json()["role"] == "member"
+    assert store.entra_upserts == []

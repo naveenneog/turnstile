@@ -132,6 +132,11 @@ class Settings(BaseSettings):
     # and nobody else is given an account: who administers the console is decided by the
     # role assignment in Entra, not by a row in this database.
     entra_admin_role: str = ""
+    # App roles that sign in read-only, as Member, beside the admin role: a FinOps viewer,
+    # and a manager whose reach is the manager groups in their token. Empty keeps the
+    # console admin-only. Either way, a person holding none of the roles never signs in.
+    entra_viewer_role: str = ""
+    entra_manager_role: str = ""
     # Application sessions are role-bound because an Owner can change budgets, model
     # access and gateway credentials while a Member is primarily a reader/caller.
     member_session_ttl_hours: int = Field(default=24, ge=1, le=168)

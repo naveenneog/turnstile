@@ -24,6 +24,7 @@ class CapturingAuthStore:
         self.entra_upserts: list[dict[str, Any]] = []
         self.expired_cleanup_calls = 0
         self.role = role
+        self.login_codes: list[dict[str, Any]] = []
 
     def find_user_by_email(self, email: str) -> dict[str, Any] | None:
         if email != "owner@contoso.com":
@@ -57,6 +58,20 @@ class CapturingAuthStore:
                 "expires_at": expires_at,
             }
         )
+
+    def create_login_code(self, user_id: UUID, code_sha256: str, expires_at: datetime) -> None:
+        self.login_codes.append(
+            {"user_id": user_id, "code_sha256": code_sha256, "expires_at": expires_at}
+        )
+
+    def consume_login_code(self, code_sha256: str) -> dict[str, Any] | None:
+        for index, item in enumerate(self.login_codes):
+            if item["code_sha256"] == code_sha256:
+                del self.login_codes[index]
+                if item["expires_at"] <= datetime.now(UTC):
+                    return None
+                return self._user(None, email="admin@contoso.com", display_name="Admin")
+        return None
 
     def session_owner(self, token_sha256: str) -> dict[str, Any] | None:
         session = next(

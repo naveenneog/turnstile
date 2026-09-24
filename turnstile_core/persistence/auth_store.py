@@ -141,9 +141,7 @@ class AuthStore:
         """Create the first account only while the user table is empty."""
         with self._connection() as connection, connection.transaction():
             connection.execute("LOCK TABLE app_user IN SHARE ROW EXCLUSIVE MODE")
-            if connection.execute("SELECT EXISTS (SELECT 1 FROM app_user)").fetchone()[
-                "exists"
-            ]:
+            if connection.execute("SELECT EXISTS (SELECT 1 FROM app_user)").fetchone()["exists"]:
                 return None
             row = connection.execute(
                 """INSERT INTO app_user (email, password_hash, role)
@@ -217,13 +215,44 @@ class AuthStore:
 
     def delete_session(self, token_sha256: str) -> None:
         with self._connection() as connection:
+            connection.execute("DELETE FROM user_session WHERE token_sha256 = %s", (token_sha256,))
+
+    # --- browser sign-in codes -------------------------------------------------------
+
+    def create_login_code(self, user_id: UUID, code_sha256: str, expires_at: datetime) -> None:
+        """Store a single-use browser sign-in code, dropping any that have lapsed."""
+        with self._connection() as connection:
+            connection.execute("DELETE FROM console_login_code WHERE expires_at <= now()")
             connection.execute(
-                "DELETE FROM user_session WHERE token_sha256 = %s", (token_sha256,)
+                """
+                INSERT INTO console_login_code (code_sha256, user_id, expires_at)
+                VALUES (%s, %s, %s)
+                """,
+                (code_sha256, user_id, expires_at),
             )
+
+    def consume_login_code(self, code_sha256: str) -> dict[str, Any] | None:
+        """The account a sign-in code was issued for, exactly once.
+
+        The row is deleted as it is read, in one statement, so two tabs racing with the same
+        link cannot both open a session. An expired code or a disabled account yields None.
+        """
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                DELETE FROM console_login_code AS c
+                USING app_user AS u
+                WHERE c.code_sha256 = %s
+                  AND c.user_id = u.id
+                  AND c.expires_at > now()
+                  AND u.enabled
+                RETURNING u.id, u.email, u.display_name, u.password_hash, u.role, u.enabled
+                """,
+                (code_sha256,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def delete_expired_sessions(self) -> int:
         with self._connection() as connection:
-            cursor = connection.execute(
-                "DELETE FROM user_session WHERE expires_at <= now()"
-            )
+            cursor = connection.execute("DELETE FROM user_session WHERE expires_at <= now()")
             return cursor.rowcount or 0
